@@ -1,0 +1,92 @@
+[
+  {
+    "slug": "getting-started",
+    "title": "Getting Started with OrderFlow",
+    "tags": ["onboarding", "dashboard"],
+    "content": "Welcome to OrderFlow! Here's how to get your restaurant set up and taking orders.\n\n## Step 1: Complete Your Profile\nHead to the onboarding wizard from your dashboard. Enter your restaurant name, address, phone number, and cuisine type. This information is shown to customers on your ordering page.\n\n## Step 2: Add Your Menu\nYou can add items manually — create categories (like Starters, Mains, Desserts) and add items with names, prices, and descriptions. You can also import your menu by pasting JSON data if you have it exported from another system.\n\n## Step 3: Set Delivery & Hours\nChoose whether you offer delivery, collection, or both. Set your delivery fee, minimum order amount, and opening hours for each day of the week.\n\n## Step 4: Connect Payments\nConnect your Stripe account so you can accept card payments. Money goes directly to your bank account — OrderFlow never holds your funds.\n\n## Step 5: Go Live\nOnce you've completed all the steps, hit 'Publish Your Restaurant'. Your ordering page will be live instantly. Share the link with your customers!"
+  },
+  {
+    "slug": "menu-management",
+    "title": "Managing Your Menu",
+    "tags": ["menu", "dashboard"],
+    "content": "Your menu is the heart of your ordering page. Here's how to manage it effectively.\n\n## Adding Categories\nGo to Dashboard → Menu. Click 'Add Category' to create sections like Starters, Mains, Sides, Drinks, and Desserts. Drag categories to reorder them.\n\n## Adding Menu Items\nClick into a category, then click 'Add Item'. Fill in the name, price (in pence — so £8.50 is 850), and optionally a description and image. Toggle 'Available' to temporarily hide items that are sold out.\n\n## Modifiers & Options\nAdd modifiers for customisation (e.g. 'Choose your base: Naan / Rice / Chips'). Each modifier can have multiple options with optional extra charges.\n\n## Allergen Information\nMark allergen information on each item. Customers must confirm they've checked allergens before placing an order — this is a legal requirement.\n\n## Images\nUpload appetising photos for your items. Images are automatically optimised to WebP format and resized. Menu grids show thumbnails for fast loading."
+  },
+  {
+    "slug": "taking-first-order",
+    "title": "Taking Your First Order",
+    "tags": ["orders", "dashboard"],
+    "content": "Here's what happens when a customer places an order.\n\n## The Order Flow\n1. Customer visits your ordering page and adds items to their basket\n2. At checkout, they enter their details and pay by card\n3. You receive an email notification and the order appears on your dashboard\n4. If you have a printer connected, the order prints automatically\n5. Update the order status as you prepare and complete it\n\n## Managing Orders\nGo to Dashboard → Orders to see all incoming orders. Click an order to see full details. Use the status buttons to update: Confirmed → Preparing → Ready → Delivered/Collected.\n\n## Kitchen Display\nFor busy kitchens, use the Kitchen Display System at /kitchen/your-slug. This shows orders in columns by status with large, easy-to-read text designed for kitchen environments."
+  },
+  {
+    "slug": "understanding-reports",
+    "title": "Understanding Your Reports",
+    "tags": ["reports", "dashboard"],
+    "content": "The Reports page gives you insights into your business performance.\n\n## Revenue Chart\nSee your daily revenue over the selected period. Switch between 7 days, 30 days, or a custom date range.\n\n## Key Metrics\nAt the top: total orders, total revenue, average order value, and new customers for the period.\n\n## Top Items\nSee which menu items sell the most. Use this to plan your menu — promote popular items and consider removing slow sellers.\n\n## Delivery vs Collection\nA pie chart showing the split between delivery and collection orders. Helps you plan staffing and delivery logistics.\n\n## CSV Export\nDownload your order data as a CSV file for accounting or further analysis. Select a date range and click 'Export CSV'."
+  },
+  {
+    "slug": "printer-setup",
+    "title": "Setting Up Your Printer",
+    "tags": ["printer", "settings"],
+    "content": "OrderFlow uses a desktop app to print orders on your thermal receipt printer.\n\n## What You Need\n- A Windows 10 or 11 PC or laptop\n- A thermal receipt printer (we recommend Epson TM-T20III)\n- Either USB or network connection to the printer\n\n## Installation\n1. Go to Dashboard → Printer and copy your API key\n2. Download the OrderFlow Printer app\n3. Run the installer and follow the setup wizard\n4. Paste your API key when prompted\n5. Select your printer and paper size (80mm or 58mm)\n6. Click 'Test Print' to verify everything works\n\n## Troubleshooting\nIf your printer isn't working, check: Is the app running (green icon in system tray)? Is the printer turned on and connected? Try a test print from the app's settings. If prints still fail after 3 attempts, you'll receive an email/SMS alert."
+  },
+  {
+    "slug": "billing-plans",
+    "title": "Billing & Plans",
+    "tags": ["billing", "settings"],
+    "content": "OrderFlow offers three plans to suit your needs.\n\n## Plans\n- **Starter (£49/month)**: Online ordering, dashboard, 1 printer, promo codes, basic reports\n- **Growth (£89/month)**: Everything in Starter plus loyalty program, email/SMS marketing, advanced reports, CSV export, multiple printers\n- **Pro (£149/month)**: Everything in Growth plus custom domain, multi-location support, API access, white-label ordering, priority support\n\n## Annual Billing\nPay annually and get 2 months free. Switch between monthly and annual in the billing page.\n\n## Upgrading\nUpgrade anytime from Dashboard → Billing. You'll only pay the prorated difference for the rest of your current billing period.\n\n## Setup Fee\nOptional £149 one-time professional setup. We upload your menu, install your printer, and train your staff."
+  },
+  {
+    "slug": "loyalty-program",
+    "title": "Setting Up a Loyalty Program",
+    "tags": ["loyalty", "dashboard"],
+    "content": "Reward repeat customers with stamps or points. Available on Growth and Pro plans.\n\n## Stamps vs Points\n- **Stamps**: Customers earn 1 stamp per order. After a set number (e.g. 8), they get a reward.\n- **Points**: Customers earn points per £ spent. Redeem at a threshold (e.g. 100 points = £5 off).\n\n## Configuration\nGo to Dashboard → Loyalty. Choose your program type, set the earning rules and reward (discount, free delivery, or a free item). Toggle the program on.\n\n## How It Works for Customers\nWhen a customer enters their email at checkout, they'll see their loyalty progress — a stamp card or points bar. When they've earned enough, a 'Redeem your reward!' button appears. Stamps and points are earned automatically after each order."
+  },
+  {
+    "slug": "email-marketing",
+    "title": "Email & SMS Marketing",
+    "tags": ["marketing", "dashboard"],
+    "content": "Send targeted campaigns to bring customers back. Available on Growth and Pro plans.\n\n## Creating a Campaign\nGo to Dashboard → Marketing. Click 'New Campaign'. Choose email or SMS, pick a template or write your own message, and set your audience filter.\n\n## Templates\nFour built-in templates: Special Offer, New Menu Item, We Miss You, and Custom. Templates pre-fill the message body — customise it to match your voice.\n\n## Audience Filtering\nTarget specific customers: filter by minimum orders placed, or by last order date (e.g. haven't ordered in 30 days).\n\n## Sending\nClick 'Send' to dispatch your campaign. Emails are sent in batches to avoid spam filters. Each email includes a working unsubscribe link — this is legally required.\n\n## SMS\nSMS campaigns are limited to 160 characters. Requires Twilio to be configured."
+  },
+  {
+    "slug": "qr-codes",
+    "title": "QR Codes & Sharing",
+    "tags": ["qr-code", "marketing"],
+    "content": "Make it easy for customers to find your ordering page.\n\n## QR Code\nGo to Dashboard → QR Code. Your unique QR code is generated automatically. Download it as a PNG or as a branded A5 poster.\n\n## Where to Use It\n- Print the poster and place it on your counter, window, or tables\n- Add your ordering link to social media profiles (Instagram, Facebook)\n- Include in Google Business listing under 'Order Online'\n- Add to your email signature\n\n## Poster\nThe downloadable poster includes your restaurant name, QR code, ordering URL, and a call-to-action. Print it at A5 size and fold for a table tent."
+  },
+  {
+    "slug": "mobile-ordering",
+    "title": "Mobile Ordering & PWA",
+    "tags": ["ordering", "mobile"],
+    "content": "Your ordering page is fully mobile-optimised and works as a Progressive Web App.\n\n## Mobile Experience\nCustomers browsing on their phone get a fast, native-feeling experience. The menu scrolls smoothly, items are easy to tap, and checkout is simple.\n\n## Add to Home Screen\nCustomers can add your restaurant to their phone's home screen — just like an app, but without downloading anything from an app store. This creates a direct shortcut to your ordering page.\n\n## Push Notifications\nWhen a customer places an order, they can opt in to push notifications. They'll receive updates when their order status changes — 'Preparing', 'Ready for collection', or 'Out for delivery'."
+  },
+  {
+    "slug": "opening-hours",
+    "title": "Managing Opening Hours",
+    "tags": ["hours", "settings"],
+    "content": "Control when your restaurant accepts orders.\n\n## Setting Hours\nGo to Dashboard → Opening Hours. Set open and close times for each day of the week. Mark days as closed if needed.\n\n## Holiday Mode\nUse the holiday toggle to temporarily stop accepting orders — for holidays, maintenance, or any time you need a break. Orders are paused but your page stays visible.\n\n## How It Works\nYour ordering page shows whether you're currently open or closed. When closed, customers can still browse your menu but can't place orders. A message shows your next opening time."
+  },
+  {
+    "slug": "delivery-settings",
+    "title": "Delivery Settings",
+    "tags": ["delivery", "settings"],
+    "content": "Configure your delivery and collection options.\n\n## Delivery vs Collection\nYou can offer both, or just one. Toggle each on or off from your dashboard settings or during onboarding.\n\n## Delivery Fee\nSet a flat delivery fee (in pence). This is added to the customer's order at checkout.\n\n## Minimum Order\nSet a minimum order amount for delivery. Customers won't be able to check out for delivery until their basket meets this minimum.\n\n## Delivery Radius\nSet how far you deliver in miles. Customers outside this radius will only be offered collection."
+  },
+  {
+    "slug": "promo-codes",
+    "title": "Creating Promo Codes",
+    "tags": ["promotions", "dashboard"],
+    "content": "Attract new customers and reward loyal ones with discount codes.\n\n## Creating a Code\nGo to Dashboard → Promotions. Click 'Add Promo Code'. Choose a code name (e.g. WELCOME20), type (percentage off, fixed amount off, or free delivery), and value.\n\n## Usage Limits\nSet a maximum number of uses per code, and a maximum uses per customer. Set an expiry date to create urgency.\n\n## Minimum Order\nOptionally require a minimum order value before the code can be applied.\n\n## Tracking\nSee how many times each code has been used and the total discount given. Deactivate codes at any time."
+  },
+  {
+    "slug": "staff-accounts",
+    "title": "Staff Accounts & Roles",
+    "tags": ["staff", "settings"],
+    "content": "Add staff members so they can help manage orders.\n\n## Adding Staff\nGo to Dashboard → Staff. Click 'Invite Staff Member'. Enter their email and choose a role.\n\n## Roles\n- **Owner**: Full access to everything including billing, settings, reports, and staff management\n- **Staff**: Can view and manage orders, update order status, and access the kitchen display. Cannot change settings, billing, or manage other staff.\n\n## Kitchen Access\nStaff members can access the Kitchen Display System to manage order preparation without needing full dashboard access."
+  },
+  {
+    "slug": "data-privacy",
+    "title": "Data & Privacy (GDPR)",
+    "tags": ["customers", "settings"],
+    "content": "OrderFlow helps you comply with UK GDPR requirements.\n\n## Customer Data\nAll customer data (names, emails, addresses, order history) is stored securely in your dashboard. You own this data — we never share it with third parties.\n\n## Data Export\nGo to Dashboard → Customers. Select a customer and click 'Export Data' to download all their data as JSON. This satisfies Subject Access Requests.\n\n## Data Deletion\nClick 'Delete Customer Data' to anonymise a customer's records. Their personal information is replaced with 'GDPR Deleted' but order records are kept for accounting purposes.\n\n## Marketing Consent\nCustomers can unsubscribe from marketing emails at any time via the link in every email. Their opt-out status is tracked and respected."
+  }
+]

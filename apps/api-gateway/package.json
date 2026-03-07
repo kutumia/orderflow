@@ -1,0 +1,23 @@
+{
+  "name": "api-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "deploy": "wrangler deploy --minify src/index.ts",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'No unit tests yet'"
+  },
+  "dependencies": {
+    "hono": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240222.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

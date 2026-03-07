@@ -1,0 +1,17 @@
+{
+  "name": "@orderflow/printbridge-core",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./receipt": "./src/receipt.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@orderflow/core-infra": "*",
+    "handlebars": "^4.7.8"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "printbridge",
+  "version": "1.0.0",
+  "description": "OrderFlow Kitchen Printer — automatically prints orders to your thermal receipt printer",
+  "main": "src/main/index.js",
+  "author": "OrderFlow",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "dist": "electron-builder --win --publish never"
+  },
+  "build": {
+    "appId": "com.orderflow.printer",
+    "productName": "OrderFlow Printer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "certificateSubjectName": "OrderFlow Ltd"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OrderFlow Printer"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "orderflow",
+      "repo": "orderflow-printer"
+    }
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.1.7",
+    "node-thermal-printer": "^4.4.3"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  }
+}

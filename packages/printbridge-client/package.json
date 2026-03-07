@@ -1,0 +1,20 @@
+{
+  "name": "@printbridge/client",
+  "version": "0.1.0",
+  "description": "PrintBridge SDK for Node.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.0.0"
+  }
+}

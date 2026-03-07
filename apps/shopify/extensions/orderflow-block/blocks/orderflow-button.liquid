@@ -1,0 +1,59 @@
+{% comment %}
+  OrderFlow Button Block
+  Adds a floating "Order Online" button that opens the OrderFlow widget.
+{% endcomment %}
+
+{% if block.settings.restaurant_slug != blank %}
+  <script
+    src="https://orderflow.co.uk/widget.js"
+    data-restaurant="{{ block.settings.restaurant_slug }}"
+    data-button-text="{{ block.settings.button_text | default: 'Order Online' }}"
+    data-colour="{{ block.settings.brand_colour }}"
+    data-position="{{ block.settings.position }}"
+    defer
+  ></script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "OrderFlow Button",
+  "tag": "div",
+  "class": "orderflow-button-section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "restaurant_slug",
+      "label": "Restaurant Slug",
+      "info": "Your OrderFlow restaurant slug — find it in your OrderFlow dashboard."
+    },
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button Text",
+      "default": "Order Online"
+    },
+    {
+      "type": "color",
+      "id": "brand_colour",
+      "label": "Brand Colour",
+      "default": "#1B4F72"
+    },
+    {
+      "type": "select",
+      "id": "position",
+      "label": "Button Position",
+      "options": [
+        { "value": "bottom-right", "label": "Bottom Right" },
+        { "value": "bottom-left", "label": "Bottom Left" }
+      ],
+      "default": "bottom-right"
+    }
+  ],
+  "presets": [
+    {
+      "name": "OrderFlow Button",
+      "category": "Food & Drink"
+    }
+  ]
+}
+{% endschema %}

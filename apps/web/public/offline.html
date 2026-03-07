@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Offline — OrderFlow</title>
+<style>
+body{margin:0;padding:40px 20px;font-family:system-ui,sans-serif;background:#f5f5f5;display:flex;justify-content:center;align-items:center;min-height:80vh}
+.card{background:white;border-radius:16px;padding:48px;max-width:400px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+h1{margin:0 0 8px;font-size:22px;color:#333}
+p{margin:0 0 24px;font-size:14px;color:#666;line-height:1.5}
+button{background:#1B4F72;color:white;border:none;padding:12px 32px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
+button:hover{background:#163d5a}
+.icon{font-size:48px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">📡</div>
+  <h1>You're offline</h1>
+  <p>Check your connection and try again. Your order data is saved and will sync when you're back online.</p>
+  <button onclick="window.location.reload()">Try Again</button>
+</div>
+</body>
+</html>

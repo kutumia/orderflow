@@ -1,0 +1,35 @@
+# OrderFlow — Online Ordering for Restaurants
+# Shopify App Configuration
+# https://shopify.dev/docs/apps/tools/cli/configuration
+
+name = "OrderFlow"
+client_id = "${SHOPIFY_API_KEY}"
+application_url = "https://orderflow.co.uk/api/shopify"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,write_content,read_orders,write_draft_orders"
+
+[auth]
+redirect_urls = [
+  "https://orderflow.co.uk/api/shopify/callback"
+]
+
+[webhooks]
+api_version = "2024-07"
+
+  [webhooks.subscriptions]
+    [[webhooks.subscriptions]]
+    topics = ["app/uninstalled"]
+    uri = "/api/shopify/webhooks"
+
+[app_proxy]
+subpath = "orderflow"
+prefix = "apps"
+url = "https://orderflow.co.uk/api/shopify/proxy"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true

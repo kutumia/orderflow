@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OrderFlow — Online Ordering</title>
+  <script src="https://unpkg.com/@shopify/app-bridge@3/umd/index.js"></script>
+  <script src="https://unpkg.com/@shopify/app-bridge-utils@3/umd/index.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f6f6f7; color: #202223; }
+    .container { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+    .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
+    .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+    .card p { font-size: 13px; color: #6d7175; margin-bottom: 16px; }
+    .label { display: block; font-size: 13px; font-weight: 500; color: #202223; margin-bottom: 6px; }
+    .input { width: 100%; padding: 10px 12px; border: 1px solid #c9cccf; border-radius: 8px; font-size: 14px; }
+    .input:focus { outline: none; border-color: #5c6ac4; box-shadow: 0 0 0 2px rgba(92,106,196,0.2); }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    .btn-primary { background: #008060; color: white; }
+    .btn-primary:hover { background: #006e52; }
+    .btn-secondary { background: #e3e5e7; color: #202223; }
+    .btn-secondary:hover { background: #d2d5d8; }
+    .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+    .status-connected { background: #aee9d1; color: #0a5c36; }
+    .status-disconnected { background: #fed3d1; color: #8c2020; }
+    .steps { display: flex; flex-direction: column; gap: 12px; }
+    .step { display: flex; gap: 12px; align-items: flex-start; }
+    .step-num { width: 28px; height: 28px; background: #f1f2f4; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #5c6ac4; flex-shrink: 0; }
+    .step-content { flex: 1; }
+    .step-content strong { font-size: 13px; display: block; margin-bottom: 2px; }
+    .step-content span { font-size: 12px; color: #6d7175; }
+    .code-block { background: #f6f6f7; border: 1px solid #e3e5e7; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; word-break: break-all; margin-top: 8px; }
+    .divider { border: none; border-top: 1px solid #e3e5e7; margin: 16px 0; }
+    #message { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-top: 12px; display: none; }
+    #message.success { background: #aee9d1; color: #0a5c36; display: block; }
+    #message.error { background: #fed3d1; color: #8c2020; display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="card">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <div>
+          <h2>OrderFlow Online Ordering</h2>
+          <p style="margin-bottom: 0;">Accept orders directly from your Shopify store — zero commission.</p>
+        </div>
+        <span id="statusBadge" class="status status-disconnected">Not Connected</span>
+      </div>
+    </div>
+
+    <!-- Setup -->
+    <div class="card">
+      <h2>Connect Your Restaurant</h2>
+      <p>Enter your OrderFlow restaurant slug to link your ordering menu.</p>
+
+      <label class="label" for="slug">Restaurant Slug</label>
+      <div style="display: flex; gap: 8px;">
+        <input class="input" id="slug" type="text" placeholder="e.g. marios-pizzeria" />
+        <button class="btn btn-primary" onclick="saveSlug()">Connect</button>
+      </div>
+      <span style="font-size: 11px; color: #8c9196; margin-top: 4px; display: block;">
+        Find this in your <a href="https://orderflow.co.uk/dashboard/settings" target="_blank" style="color: #5c6ac4;">OrderFlow dashboard</a> → Settings.
+      </span>
+      <div id="message"></div>
+    </div>
+
+    <!-- Theme Setup -->
+    <div class="card">
+      <h2>Add to Your Theme</h2>
+      <p>Two ways to add ordering to your Shopify store:</p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <strong>OrderFlow Menu Block (Recommended)</strong>
+            <span>Go to your theme editor → Add section → "OrderFlow Menu". Embeds your full ordering menu inline on any page.</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <strong>OrderFlow Button Block</strong>
+            <span>Add section → "OrderFlow Button". Adds a floating "Order Online" button that opens an ordering popup on every page.</span>
+          </div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <p style="font-size: 12px; color: #6d7175;">
+        <strong>Manual embed:</strong> If you prefer, paste this code into any Liquid template:
+      </p>
+      <div class="code-block" id="embedCode">
+        &lt;script src="https://orderflow.co.uk/widget.js" data-restaurant="<span id="codeSlug">your-slug</span>"&gt;&lt;/script&gt;
+      </div>
+    </div>
+
+    <!-- Order Sync -->
+    <div class="card">
+      <h2>Order Sync</h2>
+      <p>OrderFlow orders are automatically created as draft orders in your Shopify admin for accounting and reconciliation.</p>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" onclick="viewOrders()">View Synced Orders</button>
+      </div>
+      <div id="ordersList" style="margin-top: 12px; display: none;"></div>
+    </div>
+
+    <!-- Help -->
+    <div class="card">
+      <h2>Need Help?</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">?</div>
+          <div class="step-content">
+            <strong><a href="https://orderflow.co.uk/help" target="_blank" style="color: #5c6ac4; text-decoration: none;">Help Centre</a></strong>
+            <span>Setup guides and troubleshooting</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">@</div>
+          <div class="step-content">
+            <strong><a href="mailto:support@orderflow.co.uk" style="color: #5c6ac4; text-decoration: none;">support@orderflow.co.uk</a></strong>
+            <span>Email our support team</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Get shop from URL params (Shopify embeds with ?shop=xxx)
+    const params = new URLSearchParams(window.location.search);
+    const shop = params.get('shop') || '';
+
+    // Load current settings
+    async function loadSettings() {
+      if (!shop) return;
+      try {
+        const res = await fetch(`/api/shopify/settings?shop=${shop}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.restaurant_slug) {
+            document.getElementById('slug').value = data.restaurant_slug;
+            document.getElementById('codeSlug').textContent = data.restaurant_slug;
+            document.getElementById('statusBadge').textContent = 'Connected';
+            document.getElementById('statusBadge').className = 'status status-connected';
+          }
+        }
+      } catch {}
+    }
+
+    async function saveSlug() {
+      const slug = document.getElementById('slug').value.trim();
+      const msg = document.getElementById('message');
+      if (!slug) { msg.textContent = 'Please enter your restaurant slug.'; msg.className = 'error'; return; }
+
+      try {
+        const res = await fetch('/api/shopify/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shop, restaurant_slug: slug }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          msg.textContent = `Connected to ${data.restaurant_name}!`;
+          msg.className = 'success';
+          document.getElementById('codeSlug').textContent = slug;
+          document.getElementById('statusBadge').textContent = 'Connected';
+          document.getElementById('statusBadge').className = 'status status-connected';
+        } else {
+          msg.textContent = data.error || 'Failed to connect.';
+          msg.className = 'error';
+        }
+      } catch {
+        msg.textContent = 'Something went wrong.';
+        msg.className = 'error';
+      }
+    }
+
+    async function viewOrders() {
+      const list = document.getElementById('ordersList');
+      list.style.display = 'block';
+      list.innerHTML = '<span style="font-size:12px;color:#6d7175">Loading...</span>';
+      try {
+        const res = await fetch(`/api/shopify/orders?shop=${shop}`);
+        const data = await res.json();
+        if (data.orders && data.orders.length > 0) {
+          list.innerHTML = data.orders.map(o =>
+            `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f2f4;font-size:12px;">
+              <span>#${o.order_number}</span>
+              <span>£${(o.total / 100).toFixed(2)}</span>
+              <span style="color:#6d7175">${new Date(o.created_at).toLocaleDateString('en-GB')}</span>
+            </div>`
+          ).join('');
+        } else {
+          list.innerHTML = '<span style="font-size:12px;color:#6d7175">No synced orders yet.</span>';
+        }
+      } catch {
+        list.innerHTML = '<span style="font-size:12px;color:#8c2020">Failed to load orders.</span>';
+      }
+    }
+
+    loadSettings();
+  </script>
+</body>
+</html>

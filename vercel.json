@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/onboarding-emails",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/engagement",
+      "schedule": "0 10 * * *"
+    }
+  ]
+}

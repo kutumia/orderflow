@@ -1,0 +1,19 @@
+name = "OrderFlow Native Checkout"
+type = "checkout_ui_extension"
+target = "purchase.checkout.block.render"
+
+[extensions]
+type = "checkout_ui_extension"
+name = "orderflow-native-checkout"
+
+[[extensions.targeting]]
+target = "purchase.checkout.block.render"
+module = "./src/Checkout.tsx"
+
+[[extensions.targeting]]
+target = "purchase.checkout.cart-line-item.render-after"
+module = "./src/Checkout.tsx"
+
+[capabilities]
+network_access = true
+api_access = true

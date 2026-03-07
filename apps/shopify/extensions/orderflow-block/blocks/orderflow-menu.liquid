@@ -1,0 +1,74 @@
+{% comment %}
+  OrderFlow Menu Block
+  Embeds the full OrderFlow ordering menu inline on any Shopify page.
+  Merchant configures via theme editor.
+{% endcomment %}
+
+<div class="orderflow-menu-wrapper" {{ block.shopify_attributes }}>
+  {% if block.settings.restaurant_slug == blank %}
+    <div style="padding: 40px; text-align: center; background: #f5f5f5; border-radius: 12px; color: #666; font-family: system-ui, sans-serif;">
+      <p style="font-weight: 600; margin-bottom: 8px;">OrderFlow Menu</p>
+      <p style="font-size: 14px;">Enter your restaurant slug in the block settings to display your ordering menu.</p>
+    </div>
+  {% else %}
+    <iframe
+      src="https://orderflow.co.uk/{{ block.settings.restaurant_slug }}?embed=true&ref=shopify"
+      style="width: 100%; height: {{ block.settings.height }}px; border: none; border-radius: {{ block.settings.border_radius }}px; overflow: hidden;"
+      title="Order from {{ block.settings.restaurant_slug | replace: '-', ' ' | capitalize }}"
+      loading="lazy"
+      allow="payment"
+    ></iframe>
+    {% if block.settings.show_branding %}
+      <p style="text-align: center; font-size: 11px; color: #999; margin-top: 8px; font-family: system-ui, sans-serif;">
+        Powered by <a href="https://orderflow.co.uk" target="_blank" rel="noopener" style="color: #999; text-decoration: underline;">OrderFlow</a>
+      </p>
+    {% endif %}
+  {% endif %}
+</div>
+
+{% schema %}
+{
+  "name": "OrderFlow Menu",
+  "tag": "section",
+  "class": "orderflow-section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "restaurant_slug",
+      "label": "Restaurant Slug",
+      "info": "Your OrderFlow restaurant slug — find it in your OrderFlow dashboard under Settings."
+    },
+    {
+      "type": "range",
+      "id": "height",
+      "label": "Menu Height (px)",
+      "min": 400,
+      "max": 1200,
+      "step": 50,
+      "default": 750,
+      "info": "Adjust to fit your menu length"
+    },
+    {
+      "type": "range",
+      "id": "border_radius",
+      "label": "Corner Radius (px)",
+      "min": 0,
+      "max": 24,
+      "step": 4,
+      "default": 12
+    },
+    {
+      "type": "checkbox",
+      "id": "show_branding",
+      "label": "Show 'Powered by OrderFlow'",
+      "default": true
+    }
+  ],
+  "presets": [
+    {
+      "name": "OrderFlow Menu",
+      "category": "Food & Drink"
+    }
+  ]
+}
+{% endschema %}

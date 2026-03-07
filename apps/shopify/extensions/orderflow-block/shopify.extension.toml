@@ -1,0 +1,14 @@
+api_version = "2024-07"
+
+[[extensions]]
+name = "OrderFlow Online Ordering"
+handle = "orderflow-block"
+type = "theme"
+
+  [[extensions.targeting]]
+  module = "./blocks/orderflow-menu.liquid"
+  target = "section"
+
+  [[extensions.targeting]]
+  module = "./blocks/orderflow-button.liquid"
+  target = "section"

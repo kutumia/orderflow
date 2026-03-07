@@ -1,0 +1,16 @@
+{
+  "name": "@orderflow/security",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@orderflow/core-infra": "*",
+    "@upstash/ratelimit": "^1.0.0",
+    "@upstash/redis": "^1.28.0",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/bcryptjs": "^2.4.6"
+  }
+}
