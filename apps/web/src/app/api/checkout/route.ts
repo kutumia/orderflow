@@ -4,13 +4,27 @@ import { stripe, calculatePlatformFee } from "@/lib/stripe";
 import { checkRateLimitAsync } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { z } from "zod";
+import crypto from "crypto";
+
+const CartModifierSchema = z.object({
+  modifier_id: z.string().uuid("Invalid modifier ID"),
+  option_id:   z.string().uuid("Invalid modifier option ID"),
+  name:        z.string().max(100).optional(),
+  price:       z.number().int().min(0).optional(),
+});
+
+const CartItemSchema = z.object({
+  item_id:   z.string().uuid("Invalid item ID"),
+  quantity:  z.number().int().min(1, "Quantity must be at least 1").max(50, "Quantity too large"),
+  modifiers: z.array(CartModifierSchema).max(20, "Too many modifiers").optional(),
+});
 
 const checkoutSchema = z.object({
   restaurant_id: z.string().uuid("Invalid restaurant ID"),
   customer_name: z.string().min(1, "Name is required").max(100),
   customer_email: z.string().email("Invalid email").max(254),
   customer_phone: z.string().min(1, "Phone is required").max(20),
-  items: z.array(z.any()).min(1, "Cart is empty").max(100, "Too many items in cart"),
+  items: z.array(CartItemSchema).min(1, "Cart is empty").max(100, "Too many items in cart"),
   order_type: z.enum(["delivery", "collection"], { errorMap: () => ({ message: "Invalid order type" }) }),
   delivery_address: z.string().max(500).optional().nullable(),
   notes: z.string().max(500).optional().nullable(),
@@ -122,17 +136,21 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Fetch menu items AND their modifiers from DB ──
+    // [P1] Items scoped by restaurant_id to prevent cross-tenant price injection.
     const itemIds = [...new Set(items.map((i: any) => i.item_id))];
     const { data: menuItems } = await supabaseAdmin
       .from("menu_items")
       .select("id, price, is_available, name")
-      .in("id", itemIds);
+      .in("id", itemIds)
+      .eq("restaurant_id", restaurant_id);
 
     if (!menuItems) {
       return NextResponse.json({ error: "Failed to verify items" }, { status: 500 });
     }
 
     // ── BUG-001 FIX: Fetch modifier prices from DB ──
+    // Modifiers are scoped via item_id — only items already verified above are
+    // present in itemIds, so cross-restaurant modifiers cannot appear here.
     const { data: dbModifiers } = await supabaseAdmin
       .from("item_modifiers")
       .select("id, item_id, name, options")
@@ -285,6 +303,11 @@ export async function POST(req: NextRequest) {
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentData);
 
     // ── Store pending order in DB ──
+    // [P2] customer_token is a random secret returned to the customer and
+    // required by /api/orders/status to access order PII. Without it,
+    // knowing only the order UUID is not sufficient to read customer details.
+    const customerToken = crypto.randomBytes(16).toString("hex");
+
     const { data: order, error: orderErr } = await supabaseAdmin
       .from("orders")
       .insert({
@@ -307,6 +330,7 @@ export async function POST(req: NextRequest) {
         stripe_payment_intent_id: paymentIntent.id,
         allergen_confirmed: true,
         promo_code_used: promoCodeUsed,
+        customer_token: customerToken,
       })
       .select("id, order_number")
       .single();
@@ -327,12 +351,14 @@ export async function POST(req: NextRequest) {
       clientSecret: paymentIntent.client_secret,
       orderId: order.id,
       orderNumber: order.order_number,
+      customerToken,
       total,
     });
-  } catch (err: any) {
-    log.error("Checkout error", { error: err.message, stack: err.stack });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    log.error("Checkout error", { error: message });
     return NextResponse.json(
-      { error: err.message || "Checkout failed" },
+      { error: "Checkout failed. Please try again." },
       { status: 500 }
     );
   }

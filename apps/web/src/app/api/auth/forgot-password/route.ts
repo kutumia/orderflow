@@ -82,8 +82,8 @@ export async function POST(req: NextRequest) {
 
     log.info("Password reset email sent", { userId: user.id });
     return successResponse;
-  } catch (err: any) {
-    log.error("Forgot password error", { error: err.message });
+  } catch (err: unknown) {
+    log.error("Forgot password error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
   }
 }

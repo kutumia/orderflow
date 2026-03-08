@@ -17,8 +17,13 @@ import crypto from "crypto";
  */
 export async function POST(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
-  const secret = req.headers.get("Authorization")?.replace("Bearer ", "");
-  if (!cronSecret || secret !== cronSecret) {
+  const secret = req.headers.get("Authorization")?.replace("Bearer ", "") ?? "";
+  // Use timing-safe comparison to prevent brute-force via timing side-channel
+  if (
+    !cronSecret ||
+    secret.length !== cronSecret.length ||
+    !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(cronSecret))
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -87,6 +92,7 @@ async function processWeMissYou(restaurant: any) {
   const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
 
   // Customers with last order > 14 days ago, not already emailed in last 30 days
+  // P-4: .limit(50) pushed to DB — avoids fetching unbounded rows then slicing in JS
   const { data: customers } = await supabaseAdmin
     .from("customers")
     .select("id, email, name, last_order_at, last_reminder_sent_at")
@@ -94,9 +100,10 @@ async function processWeMissYou(restaurant: any) {
     .eq("marketing_opt_out", false)
     .eq("gdpr_deleted", false)
     .lt("last_order_at", fourteenDaysAgo)
-    .not("email", "is", null);
+    .not("email", "is", null)
+    .limit(50);
 
-  for (const customer of (customers || []).slice(0, 50)) {
+  for (const customer of customers || []) {
     // Skip if reminded in last 30 days
     if (customer.last_reminder_sent_at && new Date(customer.last_reminder_sent_at) > new Date(Date.now() - 30 * 86400000)) continue;
 
@@ -116,14 +123,16 @@ async function processWeMissYou(restaurant: any) {
 
     // Generate one-time promo code
     const promoCode = `MISSYOU-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+    // [P1 FIX] Column names corrected to match schema.sql: use_count (not uses),
+    // expiry (not expires_at). The old names caused a Postgres runtime error.
     await supabaseAdmin.from("promo_codes").insert({
       restaurant_id: restaurant.id,
       code: promoCode,
       type: "percentage",
       value: 10,
       max_uses: 1,
-      uses: 0,
-      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+      use_count: 0,
+      expiry: new Date(Date.now() + 7 * 86400000).toISOString(),
       is_active: true,
     });
 
@@ -162,13 +171,15 @@ async function processLoyaltyReady(restaurant: any) {
   if (!program) return;
 
   // Find cards where stamps_earned >= stamps_required and not yet notified
+  // P-4: .limit(50) pushed to DB — avoids fetching unbounded rows then slicing in JS
   const { data: cards } = await supabaseAdmin
     .from("loyalty_cards")
     .select("id, customer_email, stamps_earned, points_balance")
     .eq("restaurant_id", restaurant.id)
-    .gte("stamps_earned", program.stamps_required || 999);
+    .gte("stamps_earned", program.stamps_required || 999)
+    .limit(50);
 
-  for (const card of (cards || []).slice(0, 50)) {
+  for (const card of cards || []) {
     if (!card.customer_email) continue;
 
     // Check not already notified
@@ -204,6 +215,7 @@ async function processLoyaltyReady(restaurant: any) {
 
 async function processReorderReminders(restaurant: any) {
   // Get customers with known frequency who are overdue
+  // P-4: .limit(50) pushed to DB — avoids fetching unbounded rows then slicing in JS
   const { data: customers } = await supabaseAdmin
     .from("customers")
     .select("id, email, name, avg_order_frequency_days, last_order_at, last_reminder_sent_at")
@@ -211,9 +223,10 @@ async function processReorderReminders(restaurant: any) {
     .eq("marketing_opt_out", false)
     .eq("gdpr_deleted", false)
     .gt("avg_order_frequency_days", 0)
-    .not("email", "is", null);
+    .not("email", "is", null)
+    .limit(50);
 
-  for (const customer of (customers || []).slice(0, 50)) {
+  for (const customer of customers || []) {
     if (!customer.last_order_at || !customer.avg_order_frequency_days) continue;
 
     const daysSinceOrder = (Date.now() - new Date(customer.last_order_at).getTime()) / 86400000;

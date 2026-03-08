@@ -2,6 +2,13 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 
+// Fail fast at startup if the API key is not configured.
+// An unset key must not silently degrade to "allow all".
+const API_GATEWAY_API_KEY = (typeof process !== 'undefined' && process.env.API_GATEWAY_API_KEY) || ''
+if (!API_GATEWAY_API_KEY) {
+  throw new Error('API_GATEWAY_API_KEY environment variable must be set')
+}
+
 const app = new Hono()
 
 const ALLOWED_ORIGINS = (typeof process !== 'undefined' && process.env.CORS_ORIGINS)
@@ -11,17 +18,19 @@ const ALLOWED_ORIGINS = (typeof process !== 'undefined' && process.env.CORS_ORIG
 app.use('*', logger())
 app.use('*', cors({
   origin: (origin) => {
-    if (ALLOWED_ORIGINS.length === 0) return '*'
+    // Default to restrictive — only allow listed origins.
+    // Set CORS_ORIGINS env var to comma-separated list of allowed origins.
+    if (ALLOWED_ORIGINS.length === 0) return null
     return ALLOWED_ORIGINS.includes(origin) ? origin : null
   },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
 }))
 
-async function requireApiKey(c: any, next: () => Promise<void>) {
+async function requireApiKey(c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }, next: () => Promise<void>) {
   const apiKey = c.req.header('X-API-Key') || c.req.header('Authorization')?.replace(/^Bearer\s+/i, '')
-  const expected = typeof process !== 'undefined' ? process.env.API_GATEWAY_API_KEY : undefined
-  if (!expected || apiKey === expected) {
+  // Fail-closed: API_GATEWAY_API_KEY is guaranteed set above (startup check).
+  if (apiKey === API_GATEWAY_API_KEY) {
     await next()
     return
   }
@@ -37,9 +46,10 @@ const v1 = new Hono()
 v1.use('/orders', requireApiKey)
 v1.post('/orders', async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  console.log('[Event Bus] Publishing order.created event to QStash', (body as { order_id?: string }).order_id)
+  const orderId = (body as { order_id?: string }).order_id
+  console.log('[Event Bus] Publishing order.created event to QStash', orderId)
   return c.json(
-    { accepted: true, eventId: 'msg_' + Math.random().toString(36).substring(2, 11) },
+    { accepted: true, eventId: crypto.randomUUID() },
     202
   )
 })

@@ -4,6 +4,9 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
 import { escapeHtml } from "@/lib/validation";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
+import { log } from "@/lib/logger";
+import { audit, AUDIT_ACTIONS } from "@/lib/audit-logger";
 
 /**
  * POST /api/orders/refund
@@ -11,6 +14,10 @@ import { escapeHtml } from "@/lib/validation";
  * Processes a full refund via Stripe, updates order status, emails customer.
  */
 export async function POST(req: NextRequest) {
+  // 5 refund attempts per hour per IP — prevents abuse of financial operations
+  const limited = await checkRateLimitAsync(req, "refund");
+  if (limited) return limited;
+
   const guard = await requireOwner(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
@@ -60,8 +67,25 @@ export async function POST(req: NextRequest) {
       })
       .eq("id", order_id);
 
+    // Audit log — financial operations require a complete audit trail
+    await audit(req, {
+      actor: guard.user.id,
+      tenant: restaurantId,
+      action: AUDIT_ACTIONS.REFUND_ISSUED,
+      target_type: "order",
+      target_id: order_id,
+      result: "success",
+      metadata: {
+        amount_pence: refund.amount,
+        stripe_refund_id: refund.id,
+        stripe_payment_intent_id: order.stripe_payment_intent_id,
+        order_number: order.order_number,
+        reason: reason || "Refund requested by restaurant",
+      },
+    });
+
     // Send refund email to customer
-    const restaurant = order.restaurants as any;
+    const restaurant = order.restaurants as { name?: string } | null;
     const fp = (pence: number) => `£${(pence / 100).toFixed(2)}`;
 
     await sendEmail({
@@ -97,10 +121,21 @@ export async function POST(req: NextRequest) {
       refund_id: refund.id,
       amount: refund.amount,
     });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: `Refund failed: ${err.message}` },
-      { status: 500 }
-    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    log.error("Refund processing failed", { order_id, error: message });
+
+    // Audit log the failure
+    await audit(req, {
+      actor: guard.user.id,
+      tenant: restaurantId,
+      action: AUDIT_ACTIONS.REFUND_FAILED,
+      target_type: "order",
+      target_id: order_id,
+      result: "failure",
+      error_message: "Refund processing failed",
+    }).catch(() => {});
+
+    return NextResponse.json({ error: "Refund processing failed" }, { status: 500 });
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processQueueBatch } from "@/lib/queue";
 import { log } from "@/lib/logger";
+import crypto from "crypto";
 
 /**
  * GET /api/cron/process-queue
@@ -15,8 +16,14 @@ import { log } from "@/lib/logger";
  */
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.get("authorization");
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  const authHeader = req.headers.get("authorization") ?? "";
+  const secret = authHeader.replace(/^Bearer\s+/i, "");
+  // Use timing-safe comparison to prevent brute-force via timing side-channel
+  if (
+    !cronSecret ||
+    secret.length !== cronSecret.length ||
+    !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(cronSecret))
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -25,8 +32,9 @@ export async function GET(req: NextRequest) {
     const processed = await processQueueBatch(20);
     log.info("Queue batch processed", { processed });
     return NextResponse.json({ processed });
-  } catch (err: any) {
-    log.error("Queue processing error", { error: err.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    log.error("Queue processing error", { error: message });
     return NextResponse.json({ error: "Queue processing failed" }, { status: 500 });
   }
 }

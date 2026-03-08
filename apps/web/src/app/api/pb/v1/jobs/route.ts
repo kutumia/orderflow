@@ -38,9 +38,10 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ job }, { status: 201 });
-  } catch (err: any) {
-    if (err.message === "Monthly job limit exceeded") {
-      return NextResponse.json({ error: err.message }, { status: 429 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "";
+    if (message === "Monthly job limit exceeded") {
+      return NextResponse.json({ error: message }, { status: 429 });
     }
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

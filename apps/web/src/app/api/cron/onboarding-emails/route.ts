@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
 import { escapeHtml } from "@/lib/validation";
+import crypto from "crypto";
 
 /**
  * GET /api/cron/onboarding-emails
@@ -13,12 +14,21 @@ import { escapeHtml } from "@/lib/validation";
  * { "crons": [{ "path": "/api/cron/onboarding-emails", "schedule": "0 9 * * *" }] }
  *
  * Protected by CRON_SECRET env var.
+ *
+ * P-1: N+1 eliminated — owners and menu item counts are batch-fetched
+ * before the loop instead of one query per restaurant.
  */
 export async function GET(req: NextRequest) {
   // Verify cron secret — reject if CRON_SECRET is not configured
   const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.get("authorization");
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  const authHeader = req.headers.get("authorization") ?? "";
+  const secret = authHeader.replace(/^Bearer\s+/i, "");
+  // Use timing-safe comparison to prevent brute-force via timing side-channel
+  if (
+    !cronSecret ||
+    secret.length !== cronSecret.length ||
+    !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(cronSecret))
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -31,23 +41,41 @@ export async function GET(req: NextRequest) {
     .select("id, name, slug, created_at, onboarding_emails_sent")
     .eq("is_active", true);
 
-  if (!restaurants) return NextResponse.json({ sent: 0 });
+  if (!restaurants || restaurants.length === 0) return NextResponse.json({ sent: 0 });
+
+  const restaurantIds = restaurants.map((r) => r.id);
+
+  // Batch-fetch 1: all owners for these restaurants — replaces N per-restaurant queries
+  const { data: owners } = await supabaseAdmin
+    .from("users")
+    .select("email, name, restaurant_id")
+    .eq("role", "owner")
+    .in("restaurant_id", restaurantIds);
+
+  const ownerMap: Record<string, { email: string; name: string }> = {};
+  for (const o of owners || []) {
+    ownerMap[o.restaurant_id] = { email: o.email, name: o.name };
+  }
+
+  // Batch-fetch 2: menu item counts per restaurant — replaces N per-restaurant COUNT queries
+  const { data: menuItems } = await supabaseAdmin
+    .from("menu_items")
+    .select("restaurant_id")
+    .in("restaurant_id", restaurantIds);
+
+  const menuCountMap: Record<string, number> = {};
+  for (const m of menuItems || []) {
+    menuCountMap[m.restaurant_id] = (menuCountMap[m.restaurant_id] || 0) + 1;
+  }
 
   for (const r of restaurants) {
+    const owner = ownerMap[r.id];
+    if (!owner) continue;
+
     const createdAt = new Date(r.created_at);
     const daysSinceCreation = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
     const emailsSent = (r.onboarding_emails_sent || {}) as Record<string, string>;
     let sent = 0; // per-restaurant counter
-
-    // Get the owner email
-    const { data: owner } = await supabaseAdmin
-      .from("users")
-      .select("email, name")
-      .eq("restaurant_id", r.id)
-      .eq("role", "owner")
-      .single();
-
-    if (!owner) continue;
 
     // Day 0: Welcome email (same day as registration)
     if (daysSinceCreation >= 0 && !emailsSent.day0) {
@@ -71,15 +99,9 @@ export async function GET(req: NextRequest) {
       sent++;
     }
 
-    // Day 3: Menu setup reminder
+    // Day 3: Menu setup reminder — uses pre-fetched menuCountMap (no extra DB query)
     if (daysSinceCreation >= 3 && !emailsSent.day3) {
-      // Check if they've added menu items
-      const { count } = await supabaseAdmin
-        .from("menu_items")
-        .select("id", { count: "exact", head: true })
-        .eq("restaurant_id", r.id);
-
-      const hasMenu = (count || 0) > 0;
+      const hasMenu = (menuCountMap[r.id] || 0) > 0;
 
       await sendEmail({
         to: owner.email,

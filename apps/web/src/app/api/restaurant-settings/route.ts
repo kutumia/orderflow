@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { requireOwner, requireSession } from "@/lib/guard";
+import { invalidateCache } from "@/lib/cache";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 
 const EDITABLE_FIELDS = [
   "name", "address", "phone", "email", "description",
@@ -33,6 +35,9 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/restaurant-settings
 export async function PUT(req: NextRequest) {
+  const limited = await checkRateLimitAsync(req, "mutation");
+  if (limited) return limited;
+
   const guard = await requireOwner(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
@@ -40,7 +45,7 @@ export async function PUT(req: NextRequest) {
   const body = await req.json();
 
   // Filter to only editable fields
-  const updates: Record<string, any> = {};
+  const updates: Record<string, unknown> = {};
   for (const key of EDITABLE_FIELDS) {
     if (key in body) {
       updates[key] = body[key];
@@ -75,6 +80,8 @@ export async function PUT(req: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  await invalidateCache(`restaurant:${restaurantId}`);
 
   return NextResponse.json({ success: true });
 }

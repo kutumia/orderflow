@@ -7,6 +7,19 @@
  *   2. Role enforcement
  *   3. DB-verified restaurant ownership (second factor beyond stale JWT)
  *
+ * ## Role Hierarchy & Access Policy
+ *
+ * | Guard           | Allowed roles          | Typical use                          |
+ * |-----------------|------------------------|--------------------------------------|
+ * | requireSession  | owner, manager, staff  | Read-only views (orders, kitchen)    |
+ * | requireManager  | owner, manager         | Menu, categories, hours mutations    |
+ * | requireOwner    | owner only             | Staff mgmt, billing, settings, refunds |
+ *
+ * Staff is a read-only role. Staff can view orders and kitchen status but
+ * cannot modify menu items, categories, hours, restaurant settings, staff
+ * accounts, or initiate refunds. Routes that mutate those resources use
+ * requireManager() or requireOwner() — never requireSession().
+ *
  * Usage:
  *   const guard = await requireSession(req);
  *   if (!guard.ok) return guard.response;

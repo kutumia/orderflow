@@ -3,10 +3,16 @@ import { supabaseAdmin } from "@/lib/supabase";
 
 /**
  * GET /api/loyalty/check?restaurant_id=xxx&email=yyy
- * Public — customer checks their loyalty card progress.
+ * Public — customer checks their loyalty card progress (read-only, no PII mutation).
  *
  * POST /api/loyalty/check — redeem reward
- * Body: { restaurant_id, email }
+ * Body: { restaurant_id, email, order_id, customer_token }
+ *
+ * [P0 FIX] POST previously accepted only {restaurant_id, email}, allowing anyone
+ * to drain any customer's loyalty balance by knowing their email address.
+ * Now the caller must prove they placed an order by supplying the order_id and
+ * customer_token returned by /api/checkout. The token is a random 32-char hex
+ * string stored on the order — without it, guessing the order UUID is not enough.
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -65,15 +71,34 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/loyalty/check — redeem a reward
- * Body: { restaurant_id, email }
+ * Body: { restaurant_id, email, order_id, customer_token }
  * Returns the discount to apply.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { restaurant_id, email } = body;
+  const { restaurant_id, email, order_id, customer_token } = body;
 
-  if (!restaurant_id || !email) {
+  if (!restaurant_id || !email || !order_id || !customer_token) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+  }
+
+  // Verify the caller placed the specified order (proof of customer identity).
+  // order_id is a UUID — hard to guess but not a secret on its own.
+  // customer_token is a random 32-char hex value returned only at checkout time,
+  // making cross-customer redemption impossible without the checkout response.
+  const { data: order } = await supabaseAdmin
+    .from("orders")
+    .select("customer_email, customer_token")
+    .eq("id", order_id)
+    .eq("restaurant_id", restaurant_id)
+    .single();
+
+  if (
+    !order ||
+    order.customer_token !== customer_token ||
+    order.customer_email !== email.toLowerCase()
+  ) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { data: program } = await supabaseAdmin

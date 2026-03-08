@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
+import { log } from "@/lib/logger";
 
 // Admin-only: platform-level management
 
@@ -16,19 +17,31 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get("type") || "stats";
 
   if (type === "stats") {
+    // P-2: Use DB-level aggregate for GMV — avoids fetching all order rows to JS.
+    // get_platform_stats() is defined in migration 023. Falls back to in-process
+    // reduce when the function is not yet deployed (pre-migration environments).
     const [
       { count: restaurantCount },
       { count: userCount },
       { count: orderCount },
-      { data: revenueData },
+      { data: statsRpc },
     ] = await Promise.all([
       supabaseAdmin.from("restaurants").select("id", { count: "exact", head: true }),
       supabaseAdmin.from("users").select("id", { count: "exact", head: true }),
       supabaseAdmin.from("orders").select("id", { count: "exact", head: true }).not("status", "eq", "pending"),
-      supabaseAdmin.from("orders").select("total").not("status", "in", '("pending","cancelled")'),
+      supabaseAdmin.rpc("get_platform_stats"),
     ]);
 
-    const totalRevenue = (revenueData || []).reduce((s, o) => s + o.total, 0);
+    // get_platform_stats() is defined in migration 023. If not available, log
+    // a warning and default to 0 — do NOT fall back to fetching all orders rows
+    // (N+1 risk that could OOM or timeout on large datasets).
+    interface PlatformStats { total_gmv: number; total_orders: number; active_restaurants: number; }
+    const stats = statsRpc as PlatformStats | null;
+    const totalRevenue = stats?.total_gmv ?? 0;
+    if (!stats) {
+      log.warn("get_platform_stats() returned null — migration 023 may not be applied");
+    }
+
     const platformFees = Math.round(totalRevenue * 0.015); // 1.5% platform fee
 
     return NextResponse.json({
@@ -57,7 +70,7 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
     const { data, count, error } = await query.range(offset, offset + limit - 1);
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "Failed to fetch restaurants" }, { status: 500 });
 
     // Get order counts per restaurant
     const restaurantIds = (data || []).map((r) => r.id);

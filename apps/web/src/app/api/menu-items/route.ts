@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { requireSession } from "@/lib/guard";
+import { requireSession, requireManager } from "@/lib/guard";
+import { invalidateCache } from "@/lib/cache";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 
 // GET /api/menu-items?category_id=xxx (optional filter)
+// All authenticated roles can view menu items.
 export async function GET(req: NextRequest) {
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
@@ -20,13 +23,17 @@ export async function GET(req: NextRequest) {
   if (categoryId) query = query.eq("category_id", categoryId);
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to fetch menu items" }, { status: 500 });
   return NextResponse.json(data);
 }
 
 // POST /api/menu-items — create a new menu item
+// Restricted to manager+ so staff cannot add menu items.
 export async function POST(req: NextRequest) {
-  const guard = await requireSession(req);
+  const limited = await checkRateLimitAsync(req, "mutation");
+  if (limited) return limited;
+
+  const guard = await requireManager(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
 
@@ -71,10 +78,11 @@ export async function POST(req: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to create menu item" }, { status: 500 });
 
   if (body.modifiers && Array.isArray(body.modifiers) && body.modifiers.length > 0) {
-    const modifiers = body.modifiers.map((mod: any, i: number) => ({
+    interface ModifierInput { name: string; options?: unknown[]; required?: boolean; max_choices?: number; }
+    const modifiers = (body.modifiers as ModifierInput[]).map((mod, i) => ({
       item_id: data.id,
       name: mod.name,
       options: mod.options || [],
@@ -85,12 +93,17 @@ export async function POST(req: NextRequest) {
     await supabaseAdmin.from("item_modifiers").insert(modifiers);
   }
 
+  await invalidateCache(`menu:${restaurantId}`);
   return NextResponse.json(data, { status: 201 });
 }
 
 // PUT /api/menu-items — update a menu item
+// Restricted to manager+ so staff cannot modify menu items.
 export async function PUT(req: NextRequest) {
-  const guard = await requireSession(req);
+  const limited = await checkRateLimitAsync(req, "mutation");
+  if (limited) return limited;
+
+  const guard = await requireManager(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
 
@@ -109,11 +122,12 @@ export async function PUT(req: NextRequest) {
       .select()
       .single();
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "Failed to update availability" }, { status: 500 });
+    await invalidateCache(`menu:${restaurantId}`);
     return NextResponse.json(data);
   }
 
-  const updateData: any = {};
+  const updateData: Record<string, unknown> = {};
   if (body.name !== undefined) updateData.name = body.name.trim();
   if (body.description !== undefined) updateData.description = body.description?.trim() || null;
   if (body.price !== undefined) updateData.price = Math.round(body.price);
@@ -133,13 +147,14 @@ export async function PUT(req: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to update menu item" }, { status: 500 });
 
   if (body.modifiers !== undefined && Array.isArray(body.modifiers)) {
     await supabaseAdmin.from("item_modifiers").delete().eq("item_id", body.id);
 
     if (body.modifiers.length > 0) {
-      const modifiers = body.modifiers.map((mod: any, i: number) => ({
+      interface ModifierInput { name: string; options?: unknown[]; required?: boolean; max_choices?: number; }
+      const modifiers = (body.modifiers as ModifierInput[]).map((mod, i) => ({
         item_id: body.id,
         name: mod.name,
         options: mod.options || [],
@@ -151,12 +166,17 @@ export async function PUT(req: NextRequest) {
     }
   }
 
+  await invalidateCache(`menu:${restaurantId}`);
   return NextResponse.json(data);
 }
 
 // DELETE /api/menu-items?id=xxx
+// Restricted to manager+ so staff cannot delete menu items.
 export async function DELETE(req: NextRequest) {
-  const guard = await requireSession(req);
+  const limited = await checkRateLimitAsync(req, "mutation");
+  if (limited) return limited;
+
+  const guard = await requireManager(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
 
@@ -171,6 +191,7 @@ export async function DELETE(req: NextRequest) {
     .eq("id", id)
     .eq("restaurant_id", restaurantId);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to delete menu item" }, { status: 500 });
+  await invalidateCache(`menu:${restaurantId}`);
   return NextResponse.json({ success: true });
 }

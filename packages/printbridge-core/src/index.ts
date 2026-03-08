@@ -34,6 +34,7 @@ export interface TenantInfo {
   id: string;
   name: string;
   webhook_url?: string;
+  webhook_secret?: string;
   monthly_limit: number;
   usage_count: number;
   is_internal: boolean;
@@ -204,10 +205,14 @@ export async function updateJobStatus(params: {
     updates.error_message = params.errorMessage;
   }
 
+  // [P2 FIX] Scope update by tenant_id — previously tenantId was accepted as a
+  // parameter but never used in the query filter, allowing any authenticated
+  // PrintBridge agent to update print jobs belonging to other tenants.
   const { data } = await supabaseAdmin
     .from("print_jobs")
     .update(updates)
     .eq("id", params.jobId)
+    .eq("tenant_id", params.tenantId)
     .select()
     .single();
 
@@ -225,25 +230,40 @@ export async function updateJobStatus(params: {
 }
 
 /**
- * Get job by ID.
+ * Get job by ID, always scoped to tenant to prevent cross-tenant data leakage.
+ * tenantId is required — never optional — to enforce isolation.
  */
-export async function getJob(jobId: string, tenantId?: string): Promise<PrintJob | null> {
-  let query = supabaseAdmin.from("print_jobs").select("*").eq("id", jobId);
-  if (tenantId) query = query.eq("tenant_id", tenantId);
-  const { data } = await query.single();
+export async function getJob(jobId: string, tenantId: string): Promise<PrintJob | null> {
+  const { data } = await supabaseAdmin
+    .from("print_jobs")
+    .select("*")
+    .eq("id", jobId)
+    .eq("tenant_id", tenantId)
+    .single();
   return data || null;
+}
+
+export interface PrinterDevice {
+  id: string;
+  restaurant_id: string;
+  tenant_id?: string;
+  name: string;
+  device_type: string;
+  status: string;
+  last_seen_at?: string;
+  created_at: string;
 }
 
 /**
  * Get devices for a restaurant/tenant.
  */
-export async function getDevices(restaurantId: string): Promise<any[]> {
+export async function getDevices(restaurantId: string): Promise<PrinterDevice[]> {
   const { data } = await supabaseAdmin
     .from("printer_devices")
     .select("*")
     .eq("restaurant_id", restaurantId)
     .order("created_at", { ascending: true });
-  return data || [];
+  return (data || []) as PrinterDevice[];
 }
 
 // ── Tenant Management ──
@@ -270,7 +290,7 @@ export async function getMonthlyUsage(tenantId: string): Promise<{ count: number
 
 // ── Usage Logging ──
 
-async function logUsage(tenantId: string, jobId: string | null, action: string, metadata?: any) {
+async function logUsage(tenantId: string, jobId: string | null, action: string, metadata?: Record<string, unknown>) {
   await supabaseAdmin.from("pb_usage_logs").insert({
     tenant_id: tenantId,
     job_id: jobId,
@@ -311,12 +331,23 @@ async function fireWebhook(tenantId: string, job: PrintJob) {
     .select()
     .single();
 
+  // Compute HMAC signature so recipients can verify webhook authenticity.
+  // Tenants verify: sha256=<hex> matches HMAC-SHA256 of raw body using their webhook_secret.
+  const payloadStr = JSON.stringify(payload);
+  const signature = tenant.webhook_secret
+    ? "sha256=" + crypto.createHmac("sha256", tenant.webhook_secret).update(payloadStr).digest("hex")
+    : "";
+
   // Attempt delivery
   try {
     const res = await fetch(tenant.webhook_url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-OrderFlow-Event": event },
-      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+        "X-OrderFlow-Event": event,
+        ...(signature ? { "X-PrintBridge-Signature": signature } : {}),
+      },
+      body: payloadStr,
       signal: AbortSignal.timeout(10000),
     });
 
@@ -352,10 +383,21 @@ export async function retryPendingWebhooks() {
 
   for (const delivery of pending || []) {
     try {
+      const bodyStr = JSON.stringify(delivery.payload);
+      // Re-sign on retry using the tenant's current webhook_secret
+      const tenant = await getTenant(delivery.tenant_id);
+      const retrySig = tenant?.webhook_secret
+        ? "sha256=" + crypto.createHmac("sha256", tenant.webhook_secret).update(bodyStr).digest("hex")
+        : "";
+
       const res = await fetch(delivery.url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-OrderFlow-Event": delivery.event },
-        body: JSON.stringify(delivery.payload),
+        headers: {
+          "Content-Type": "application/json",
+          "X-OrderFlow-Event": delivery.event,
+          ...(retrySig ? { "X-PrintBridge-Signature": retrySig } : {}),
+        },
+        body: bodyStr,
         signal: AbortSignal.timeout(10000),
       });
 

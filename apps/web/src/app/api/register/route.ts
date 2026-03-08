@@ -91,8 +91,8 @@ export async function POST(req: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (err: any) {
-    log.error("Registration error", { error: err.message, stack: err.stack });
+  } catch (err: unknown) {
+    log.error("Registration error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

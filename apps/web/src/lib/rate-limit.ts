@@ -12,52 +12,46 @@
 
 import { NextResponse } from "next/server";
 
-// ─── Try to load Upstash (optional dependency) ───
-let upstashRatelimit: any = null;
-let upstashRedis: any = null;
+// ─── Upstash type shapes (duck-typed to avoid hard dependency) ───
+interface UpstashLimiter {
+  limit(key: string): Promise<{ success: boolean; limit: number; remaining: number; reset: number }>;
+}
+interface UpstashLimiters {
+  checkout: UpstashLimiter;
+  register: UpstashLimiter;
+  login: UpstashLimiter;
+  passwordReset: UpstashLimiter;
+  printPoll: UpstashLimiter;
+  general: UpstashLimiter;
+  refund: UpstashLimiter;
+  mutation: UpstashLimiter;
+}
+
+let upstashRatelimit: UpstashLimiters | null = null;
 
 try {
   // These will only resolve if @upstash/ratelimit and @upstash/redis are installed
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const ratelimitMod = require("@upstash/ratelimit");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const redisMod = require("@upstash/redis");
 
   if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-    upstashRedis = new redisMod.Redis({
+    const redis = new redisMod.Redis({
       url: process.env.UPSTASH_REDIS_REST_URL,
       token: process.env.UPSTASH_REDIS_REST_TOKEN,
     });
 
+    const { Ratelimit } = ratelimitMod;
     upstashRatelimit = {
-      checkout: new ratelimitMod.Ratelimit({
-        redis: upstashRedis,
-        limiter: ratelimitMod.Ratelimit.slidingWindow(10, "1 m"),
-        prefix: "rl:checkout",
-      }),
-      register: new ratelimitMod.Ratelimit({
-        redis: upstashRedis,
-        limiter: ratelimitMod.Ratelimit.slidingWindow(5, "1 h"),
-        prefix: "rl:register",
-      }),
-      login: new ratelimitMod.Ratelimit({
-        redis: upstashRedis,
-        limiter: ratelimitMod.Ratelimit.slidingWindow(10, "1 m"),
-        prefix: "rl:login",
-      }),
-      passwordReset: new ratelimitMod.Ratelimit({
-        redis: upstashRedis,
-        limiter: ratelimitMod.Ratelimit.slidingWindow(3, "1 h"),
-        prefix: "rl:pwreset",
-      }),
-      printPoll: new ratelimitMod.Ratelimit({
-        redis: upstashRedis,
-        limiter: ratelimitMod.Ratelimit.slidingWindow(60, "1 m"),
-        prefix: "rl:print",
-      }),
-      general: new ratelimitMod.Ratelimit({
-        redis: upstashRedis,
-        limiter: ratelimitMod.Ratelimit.slidingWindow(60, "1 m"),
-        prefix: "rl:general",
-      }),
+      checkout:      new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(10, "1 m"),   prefix: "rl:checkout" }),
+      register:      new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(5,  "1 h"),   prefix: "rl:register" }),
+      login:         new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(10, "1 m"),   prefix: "rl:login" }),
+      passwordReset: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(3,  "1 h"),   prefix: "rl:pwreset" }),
+      printPoll:     new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(60, "1 m"),   prefix: "rl:print" }),
+      general:       new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(60, "1 m"),   prefix: "rl:general" }),
+      refund:        new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(5,  "1 h"),   prefix: "rl:refund" }),
+      mutation:      new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(30, "1 m"),   prefix: "rl:mutation" }),
     };
   }
 } catch {
@@ -98,7 +92,7 @@ export function getClientIp(req: Request): string {
 /**
  * Check rate limit. Returns 429 Response if limited, null if allowed.
  *
- * Uses Upstash Redis if configured, falls back to in-memory.
+ * Uses in-memory store. For distributed rate limiting, use checkRateLimitAsync.
  */
 export function checkRateLimit(
   req: Request,
@@ -110,9 +104,6 @@ export function checkRateLimit(
   const key = `rl:${routeKey}:${ip}`;
   const now = Date.now();
 
-  // If Upstash is available, we use it asynchronously via a sync wrapper
-  // that returns null (allow) — actual enforcement happens in checkRateLimitAsync
-  // For sync callers, fall through to memory store
   const entry = memoryStore.get(key);
 
   if (!entry || entry.resetAt < now) {
@@ -140,18 +131,33 @@ export function checkRateLimit(
   return null;
 }
 
+export type RateLimitBucket =
+  | "checkout"
+  | "register"
+  | "login"
+  | "passwordReset"
+  | "printPoll"
+  | "general"
+  | "refund"
+  | "mutation";
+
 /**
- * Async rate limit using Upstash Redis. Use in API routes that can await.
+ * Async rate limit using Upstash Redis if configured, in-memory otherwise.
  *
- * Usage:
- *   const limited = await checkRateLimitAsync(req, "checkout");
- *   if (limited) return limited;
+ * Buckets:
+ *   checkout      — 10/min  (payment attempts)
+ *   register      — 5/hr    (account creation)
+ *   login         — 10/min  (login attempts)
+ *   passwordReset — 3/hr    (password resets)
+ *   printPoll     — 60/min  (print agent polling)
+ *   general       — 60/min  (default dashboard reads)
+ *   refund        — 5/hr    (financial operations)
+ *   mutation      — 30/min  (menu/category/settings writes)
  */
 export async function checkRateLimitAsync(
   req: Request,
-  bucket: "checkout" | "register" | "login" | "passwordReset" | "printPoll" | "general" = "general"
+  bucket: RateLimitBucket = "general"
 ): Promise<Response | null> {
-  // Use Upstash if available
   if (upstashRatelimit && upstashRatelimit[bucket]) {
     const ip = getClientIp(req);
     const { success, limit, remaining, reset } = await upstashRatelimit[bucket].limit(ip);
@@ -175,14 +181,19 @@ export async function checkRateLimitAsync(
   }
 
   // Fallback to memory store
-  const limits: Record<string, [number, number]> = {
-    checkout: [10, 60_000],
-    register: [5, 3600_000],
-    login: [10, 60_000],
-    passwordReset: [3, 3600_000],
-    printPoll: [60, 60_000],
-    general: [60, 60_000],
+  const limits: Record<RateLimitBucket, [number, number]> = {
+    checkout:      [10,  60_000],
+    register:      [5,   3_600_000],
+    login:         [10,  60_000],
+    passwordReset: [3,   3_600_000],
+    printPoll:     [60,  60_000],
+    general:       [60,  60_000],
+    refund:        [5,   3_600_000],
+    mutation:      [30,  60_000],
   };
-  const [max, window] = limits[bucket] || [60, 60_000];
+  const [max, window] = limits[bucket];
   return checkRateLimit(req, max, window);
 }
+
+// Re-export NextResponse for convenience (avoids unused import warnings in callers)
+export { NextResponse };

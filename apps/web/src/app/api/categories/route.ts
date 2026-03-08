@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { requireSession } from "@/lib/guard";
+import { requireSession, requireManager } from "@/lib/guard";
+import { invalidateCache } from "@/lib/cache";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 
 // GET /api/categories — list categories for authenticated restaurant
+// All authenticated roles can view categories.
 export async function GET(req: NextRequest) {
   const guard = await requireSession(req);
   if (!guard.ok) return guard.response;
@@ -14,13 +17,17 @@ export async function GET(req: NextRequest) {
     .eq("restaurant_id", restaurantId)
     .order("sort_order", { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to fetch categories" }, { status: 500 });
   return NextResponse.json(data);
 }
 
 // POST /api/categories — create a new category
+// Restricted to manager+ so staff cannot add categories.
 export async function POST(req: NextRequest) {
-  const guard = await requireSession(req);
+  const limited = await checkRateLimitAsync(req, "mutation");
+  if (limited) return limited;
+
+  const guard = await requireManager(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
 
@@ -50,13 +57,18 @@ export async function POST(req: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to create category" }, { status: 500 });
+  await invalidateCache(`categories:${restaurantId}`);
   return NextResponse.json(data, { status: 201 });
 }
 
 // PUT /api/categories — update category (name, sort_order, is_active)
+// Restricted to manager+ so staff cannot rename or reorder categories.
 export async function PUT(req: NextRequest) {
-  const guard = await requireSession(req);
+  const limited = await checkRateLimitAsync(req, "mutation");
+  if (limited) return limited;
+
+  const guard = await requireManager(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
 
@@ -67,7 +79,7 @@ export async function PUT(req: NextRequest) {
   }
 
   if (body.reorder && Array.isArray(body.items)) {
-    const updates = body.items.map((item: { id: string; sort_order: number }) =>
+    const updates = (body.items as { id: string; sort_order: number }[]).map((item) =>
       supabaseAdmin
         .from("categories")
         .update({ sort_order: item.sort_order })
@@ -75,10 +87,11 @@ export async function PUT(req: NextRequest) {
         .eq("restaurant_id", restaurantId)
     );
     await Promise.all(updates);
+    await invalidateCache(`categories:${restaurantId}`);
     return NextResponse.json({ success: true });
   }
 
-  const updateData: any = {};
+  const updateData: Record<string, unknown> = {};
   if (body.name !== undefined) updateData.name = body.name.trim();
   if (body.is_active !== undefined) updateData.is_active = body.is_active;
   if (body.sort_order !== undefined) updateData.sort_order = body.sort_order;
@@ -91,13 +104,18 @@ export async function PUT(req: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to update category" }, { status: 500 });
+  await invalidateCache(`categories:${restaurantId}`);
   return NextResponse.json(data);
 }
 
 // DELETE /api/categories — delete a category
+// Restricted to manager+ so staff cannot delete categories.
 export async function DELETE(req: NextRequest) {
-  const guard = await requireSession(req);
+  const limited = await checkRateLimitAsync(req, "mutation");
+  if (limited) return limited;
+
+  const guard = await requireManager(req);
   if (!guard.ok) return guard.response;
   const { restaurantId } = guard;
 
@@ -124,6 +142,7 @@ export async function DELETE(req: NextRequest) {
     .eq("id", id)
     .eq("restaurant_id", restaurantId);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Failed to delete category" }, { status: 500 });
+  await invalidateCache(`categories:${restaurantId}`);
   return NextResponse.json({ success: true });
 }

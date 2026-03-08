@@ -31,22 +31,27 @@ export async function GET(req: NextRequest) {
   const message = params.toString();
   const computedHmac = crypto.createHmac("sha256", apiSecret).update(message).digest("hex");
 
-  if (hmac && !crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(computedHmac))) {
+  // [P1 FIX] Previously `if (hmac && ...)` — when hmac was absent the check was
+  // silently skipped. Now we require hmac to be present AND correct.
+  if (!hmac || !crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(computedHmac))) {
     return NextResponse.json({ error: "HMAC validation failed" }, { status: 401 });
   }
 
-  // Validate nonce (CSRF protection)
+  // Validate nonce (CSRF protection) — must match AND be less than 15 minutes old.
+  // Without TTL an attacker who intercepts an old valid nonce can replay it indefinitely.
+  const nonceCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const { data: nonceRecord } = await supabaseAdmin
     .from("shopify_nonces")
-    .select("nonce")
+    .select("nonce, created_at")
     .eq("shop", shop)
+    .gt("created_at", nonceCutoff)
     .single();
 
   if (!nonceRecord || nonceRecord.nonce !== state) {
-    return NextResponse.json({ error: "Invalid state parameter" }, { status: 401 });
+    return NextResponse.json({ error: "Invalid or expired state parameter" }, { status: 401 });
   }
 
-  // Clean up nonce
+  // Clean up nonce immediately after validation (one-time use)
   await supabaseAdmin.from("shopify_nonces").delete().eq("shop", shop);
 
   // Exchange code for permanent access token
