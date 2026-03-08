@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 
 // GET /api/reports?type=revenue|popular_items|summary&period=7d|30d|90d|all
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
   const type = searchParams.get("type") || "summary";
   const period = searchParams.get("period") || "30d";

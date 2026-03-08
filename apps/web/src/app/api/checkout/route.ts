@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { stripe, calculatePlatformFee } from "@/lib/stripe";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
 import { z } from "zod";
 
@@ -23,7 +23,7 @@ const checkoutSchema = z.object({
 // POST /api/checkout — create PaymentIntent for order
 export async function POST(req: NextRequest) {
   // Rate limit: 10 checkout attempts per minute per IP
-  const limited = checkRateLimit(req, 10, 60_000);
+  const limited = await checkRateLimitAsync(req, "checkout");
   if (limited) return limited;
 
   try {

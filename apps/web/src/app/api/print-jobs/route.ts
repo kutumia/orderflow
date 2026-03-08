@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 
 // GET /api/print-jobs?status=queued|printing|printed|failed
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
 
@@ -28,10 +27,10 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/print-jobs — update print job status
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   const { job_id, status, error: printError } = body;
@@ -65,10 +64,10 @@ export async function PUT(req: NextRequest) {
 
 // POST /api/print-jobs — requeue a failed print job
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   if (body.requeue && body.job_id) {

@@ -15,14 +15,15 @@ import { escapeHtml } from "@/lib/validation";
  * Protected by CRON_SECRET env var.
  */
 export async function GET(req: NextRequest) {
-  // Verify cron secret
+  // Verify cron secret — reject if CRON_SECRET is not configured
+  const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const now = new Date();
-  let sent = 0;
+  let totalSent = 0;
 
   // Fetch all restaurants that haven't completed onboarding emails
   const { data: restaurants } = await supabaseAdmin
@@ -36,6 +37,7 @@ export async function GET(req: NextRequest) {
     const createdAt = new Date(r.created_at);
     const daysSinceCreation = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
     const emailsSent = (r.onboarding_emails_sent || {}) as Record<string, string>;
+    let sent = 0; // per-restaurant counter
 
     // Get the owner email
     const { data: owner } = await supabaseAdmin
@@ -128,16 +130,17 @@ export async function GET(req: NextRequest) {
       sent++;
     }
 
-    // Update emails_sent tracking
+    // Update emails_sent tracking only if emails were sent for this restaurant
     if (sent > 0) {
       await supabaseAdmin
         .from("restaurants")
         .update({ onboarding_emails_sent: emailsSent })
         .eq("id", r.id);
+      totalSent += sent;
     }
   }
 
-  return NextResponse.json({ sent });
+  return NextResponse.json({ sent: totalSent });
 }
 
 function onboardingTemplate(name: string, title: string, content: string, slug: string): string {

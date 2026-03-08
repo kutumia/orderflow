@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 
 // DEPRECATED: Use /api/pb/v1/heartbeat instead. This route will be removed in a future version.
 
@@ -22,7 +22,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
  * }
  */
 export async function POST(req: NextRequest) {
-  const limited = checkRateLimit(req, 120, 60_000); // 2/sec max
+  const limited = await checkRateLimitAsync(req, "printPoll"); // 60/min max
   if (limited) return limited;
 
   try {

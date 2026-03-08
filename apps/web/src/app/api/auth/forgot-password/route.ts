@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 import { validateEmail } from "@/lib/validation";
 import { log } from "@/lib/logger";
 import { randomBytes, createHash } from "crypto";
@@ -9,7 +9,7 @@ import { randomBytes, createHash } from "crypto";
 // POST /api/auth/forgot-password
 export async function POST(req: NextRequest) {
   // Strict rate limit: 3 per hour per IP
-  const limited = checkRateLimit(req, 3, 3600_000);
+  const limited = await checkRateLimitAsync(req, "passwordReset");
   if (limited) return limited;
 
   try {

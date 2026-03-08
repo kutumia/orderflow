@@ -1,141 +1,259 @@
 /**
- * Phase 9 — Auth Flow Tests
+ * Auth Guard Tests — requireSession / requireOwner / requireManager
  *
- * Tests password reset token logic, registration validation, rate limiting.
+ * Tests the actual security logic in lib/guard.ts that protects every
+ * dashboard API route. Every guard must:
+ *   1. Reject requests with no session (401)
+ *   2. Reject requests where the session signals the account is gone (401)
+ *   3. Reject requests where the user is no longer in the DB (401)
+ *   4. Reject requests where the JWT restaurant_id doesn't match DB (403)
+ *   5. Return restaurantId + typed user data when everything checks out
+ *
+ * requireOwner additionally enforces role === "owner".
+ * requireManager additionally enforces role in ["owner", "manager"].
  */
 
-import { createHash, randomBytes } from "crypto";
+// ── Mocks (hoisted above imports by Jest) ─────────────────────────────────────
 
-describe("Password reset token flow (FEAT-007)", () => {
-  it("generates a 32-byte random token", () => {
-    const token = randomBytes(32).toString("hex");
-    expect(token.length).toBe(64); // 32 bytes = 64 hex chars
+const mockGetServerSession = jest.fn();
+jest.mock("next-auth", () => ({
+  getServerSession: (...args: unknown[]) => mockGetServerSession(...args),
+}));
+jest.mock("@/lib/auth", () => ({ authOptions: {} }));
+
+const mockDbChain = jest.fn();
+jest.mock("@/lib/supabase", () => ({
+  supabaseAdmin: {
+    from: (...args: unknown[]) => mockDbChain(...args),
+  },
+}));
+
+jest.mock("@/lib/logger", () => ({
+  log: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+}));
+
+// ── Imports ────────────────────────────────────────────────────────────────────
+
+import { requireSession, requireOwner, requireManager } from "@/lib/guard";
+import { NextRequest } from "next/server";
+
+// ── Fixtures ───────────────────────────────────────────────────────────────────
+
+const RESTAURANT_ID = "550e8400-e29b-41d4-a716-446655440001";
+const USER_ID = "550e8400-e29b-41d4-a716-446655440002";
+
+const VALID_SESSION = {
+  user: {
+    id: USER_ID,
+    email: "owner@test.com",
+    name: "Test Owner",
+    restaurant_id: RESTAURANT_ID,
+    restaurant_slug: "test-pizza",
+    restaurant_name: "Test Pizza",
+    role: "owner" as const,
+    plan: "growth",
+    subscription_status: "active" as const,
+    trial_ends_at: null,
+  },
+};
+
+const VALID_DB_USER = {
+  id: USER_ID,
+  role: "owner",
+  restaurant_id: RESTAURANT_ID,
+};
+
+/** Builds a fluent Supabase mock chain whose .single() resolves to { data, error }. */
+function mockSingle(data: unknown, error: unknown = null) {
+  return {
+    select: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    single: jest.fn().mockResolvedValue({ data, error }),
+  };
+}
+
+function makeReq() {
+  return new NextRequest("http://localhost/api/test");
+}
+
+// ── requireSession ─────────────────────────────────────────────────────────────
+
+describe("requireSession", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns 401 when getServerSession returns null (not logged in)", async () => {
+    mockGetServerSession.mockResolvedValue(null);
+    const result = await requireSession(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
   });
 
-  it("hashes token with SHA-256", () => {
-    const token = "abc123testtoken";
-    const hash = createHash("sha256").update(token).digest("hex");
-    expect(hash.length).toBe(64);
-    // Same input = same hash
-    const hash2 = createHash("sha256").update(token).digest("hex");
-    expect(hash).toBe(hash2);
+  it("returns 401 with 'Session expired' body when session.error is UserNotFound", async () => {
+    mockGetServerSession.mockResolvedValue({
+      ...VALID_SESSION,
+      error: "UserNotFound",
+    });
+    const result = await requireSession(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+      const body = await result.response.json();
+      expect(body.error).toBe("Session expired");
+    }
   });
 
-  it("different tokens produce different hashes", () => {
-    const token1 = randomBytes(32).toString("hex");
-    const token2 = randomBytes(32).toString("hex");
-    const hash1 = createHash("sha256").update(token1).digest("hex");
-    const hash2 = createHash("sha256").update(token2).digest("hex");
-    expect(hash1).not.toBe(hash2);
+  it("returns 401 when user is no longer in the DB (account deleted after login)", async () => {
+    mockGetServerSession.mockResolvedValue(VALID_SESSION);
+    mockDbChain.mockReturnValue(mockSingle(null)); // DB has no record
+    const result = await requireSession(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
   });
 
-  it("token expires after 1 hour", () => {
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-    const isValid = expiresAt > new Date();
-    expect(isValid).toBe(true);
-
-    // Simulate expired token
-    const expired = new Date(Date.now() - 1000);
-    const isExpired = expired < new Date();
-    expect(isExpired).toBe(true);
-  });
-
-  it("used token cannot be reused", () => {
-    const token = { used_at: new Date().toISOString() };
-    const isUsed = !!token.used_at;
-    expect(isUsed).toBe(true);
-  });
-});
-
-describe("Registration validation", () => {
-  it("rejects password shorter than 8 characters", () => {
-    const password = "short";
-    const isValid = password.length >= 8;
-    expect(isValid).toBe(false);
-  });
-
-  it("accepts 8+ character password", () => {
-    const password = "mySecurePassword123";
-    const isValid = password.length >= 8;
-    expect(isValid).toBe(true);
-  });
-
-  it("normalises email to lowercase", () => {
-    const email = "John@Example.COM";
-    const normalised = email.toLowerCase().trim();
-    expect(normalised).toBe("john@example.com");
-  });
-
-  it("generates correct trial end date (14 days)", () => {
-    const now = new Date();
-    const trialEndsAt = new Date();
-    trialEndsAt.setDate(trialEndsAt.getDate() + 14);
-    const diffDays = Math.round(
-      (trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+  it("returns 403 when JWT restaurant_id does not match DB restaurant_id (JWT tampering guard)", async () => {
+    mockGetServerSession.mockResolvedValue(VALID_SESSION);
+    mockDbChain.mockReturnValue(
+      mockSingle({ ...VALID_DB_USER, restaurant_id: "attacker-restaurant-id" })
     );
-    expect(diffDays).toBe(14);
+    const result = await requireSession(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
+  });
+
+  it("returns ok=true with restaurantId and user when everything is valid", async () => {
+    mockGetServerSession.mockResolvedValue(VALID_SESSION);
+    mockDbChain.mockReturnValue(mockSingle(VALID_DB_USER));
+    const result = await requireSession(makeReq());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.restaurantId).toBe(RESTAURANT_ID);
+      expect(result.user.id).toBe(USER_ID);
+      expect(result.user.role).toBe("owner");
+      expect(result.user.restaurant_id).toBe(RESTAURANT_ID);
+    }
+  });
+
+  it("surfaces plan and subscription_status from the JWT session onto the guard result", async () => {
+    const session = {
+      ...VALID_SESSION,
+      user: {
+        ...VALID_SESSION.user,
+        plan: "starter",
+        subscription_status: "trialing" as const,
+      },
+    };
+    mockGetServerSession.mockResolvedValue(session);
+    mockDbChain.mockReturnValue(mockSingle(VALID_DB_USER));
+    const result = await requireSession(makeReq());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.user.plan).toBe("starter");
+      expect(result.user.subscription_status).toBe("trialing");
+    }
+  });
+
+  it("uses DB role (not JWT role) for the returned user object", async () => {
+    // JWT says "owner" but DB says "staff" — DB wins
+    mockGetServerSession.mockResolvedValue(VALID_SESSION);
+    mockDbChain.mockReturnValue(
+      mockSingle({ ...VALID_DB_USER, role: "staff" })
+    );
+    const result = await requireSession(makeReq());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.user.role).toBe("staff");
+    }
   });
 });
 
-describe("Rate limiter", () => {
-  it("getClientIp extracts from x-forwarded-for", () => {
-    const headers = new Headers();
-    headers.set("x-forwarded-for", "1.2.3.4, 5.6.7.8");
-    const forwarded = headers.get("x-forwarded-for");
-    const ip = forwarded ? forwarded.split(",")[0].trim() : "unknown";
-    expect(ip).toBe("1.2.3.4");
+// ── requireOwner ───────────────────────────────────────────────────────────────
+
+describe("requireOwner", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns 403 with 'Owner access required' when user is staff", async () => {
+    mockGetServerSession.mockResolvedValue({
+      ...VALID_SESSION,
+      user: { ...VALID_SESSION.user, role: "staff" as const },
+    });
+    mockDbChain.mockReturnValue(mockSingle({ ...VALID_DB_USER, role: "staff" }));
+    const result = await requireOwner(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(403);
+      const body = await result.response.json();
+      expect(body.error).toContain("Owner");
+    }
   });
 
-  it("getClientIp falls back to x-real-ip", () => {
-    const headers = new Headers();
-    headers.set("x-real-ip", "9.8.7.6");
-    const forwarded = headers.get("x-forwarded-for");
-    const real = headers.get("x-real-ip");
-    const ip = forwarded ? forwarded.split(",")[0].trim() : real || "unknown";
-    expect(ip).toBe("9.8.7.6");
+  it("returns 403 when user is manager (managers cannot perform owner-only actions)", async () => {
+    mockGetServerSession.mockResolvedValue({
+      ...VALID_SESSION,
+      user: { ...VALID_SESSION.user, role: "manager" as const },
+    });
+    mockDbChain.mockReturnValue(mockSingle({ ...VALID_DB_USER, role: "manager" }));
+    const result = await requireOwner(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
   });
 
-  it("getClientIp returns 'unknown' when no headers", () => {
-    const headers = new Headers();
-    const forwarded = headers.get("x-forwarded-for");
-    const real = headers.get("x-real-ip");
-    const ip = forwarded ? forwarded.split(",")[0].trim() : real || "unknown";
-    expect(ip).toBe("unknown");
+  it("returns ok=true for an owner", async () => {
+    mockGetServerSession.mockResolvedValue(VALID_SESSION);
+    mockDbChain.mockReturnValue(mockSingle(VALID_DB_USER));
+    const result = await requireOwner(makeReq());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.user.role).toBe("owner");
+  });
+
+  it("inherits 401 from requireSession when there is no session at all", async () => {
+    mockGetServerSession.mockResolvedValue(null);
+    const result = await requireOwner(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
   });
 });
 
-describe("KDS PIN authentication (BUG-010)", () => {
-  it("rejects incorrect PIN", () => {
-    const storedPin = "1234";
-    const inputPin = "5678";
-    expect(storedPin === inputPin).toBe(false);
+// ── requireManager ─────────────────────────────────────────────────────────────
+
+describe("requireManager", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns 403 with 'Manager access required' when user is staff", async () => {
+    mockGetServerSession.mockResolvedValue({
+      ...VALID_SESSION,
+      user: { ...VALID_SESSION.user, role: "staff" as const },
+    });
+    mockDbChain.mockReturnValue(mockSingle({ ...VALID_DB_USER, role: "staff" }));
+    const result = await requireManager(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(403);
+      const body = await result.response.json();
+      expect(body.error).toContain("Manager");
+    }
   });
 
-  it("accepts correct PIN", () => {
-    const storedPin = "1234";
-    const inputPin = "1234";
-    expect(storedPin === inputPin).toBe(true);
+  it("returns ok=true for a manager", async () => {
+    mockGetServerSession.mockResolvedValue({
+      ...VALID_SESSION,
+      user: { ...VALID_SESSION.user, role: "manager" as const },
+    });
+    mockDbChain.mockReturnValue(mockSingle({ ...VALID_DB_USER, role: "manager" }));
+    const result = await requireManager(makeReq());
+    expect(result.ok).toBe(true);
   });
 
-  it("allows access when no PIN is set", () => {
-    const storedPin = null;
-    const shouldAllow = !storedPin;
-    expect(shouldAllow).toBe(true);
-  });
-});
-
-describe("Timezone-aware opening hours (BUG-008)", () => {
-  it("converts UTC to London time", () => {
-    const now = new Date("2025-07-15T12:00:00Z"); // UTC noon in July (BST)
-    const londonTime = now.toLocaleString("en-US", { timeZone: "Europe/London" });
-    // BST is UTC+1, so noon UTC = 1pm London
-    expect(londonTime).toContain("1:00:00 PM");
+  it("returns ok=true for an owner (owners have all manager privileges)", async () => {
+    mockGetServerSession.mockResolvedValue(VALID_SESSION);
+    mockDbChain.mockReturnValue(mockSingle(VALID_DB_USER));
+    const result = await requireManager(makeReq());
+    expect(result.ok).toBe(true);
   });
 
-  it("handles winter time correctly", () => {
-    const now = new Date("2025-01-15T12:00:00Z"); // UTC noon in January (GMT)
-    const londonTime = now.toLocaleString("en-US", { timeZone: "Europe/London" });
-    // GMT = UTC, so noon UTC = noon London
-    expect(londonTime).toContain("12:00:00 PM");
+  it("inherits 401 from requireSession when there is no session", async () => {
+    mockGetServerSession.mockResolvedValue(null);
+    const result = await requireManager(makeReq());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
   });
 });

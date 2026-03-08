@@ -223,7 +223,7 @@ async function handlePaymentSucceeded(pi: any) {
     estimated_mins: estimatedMins,
   });
 
-  await enqueueJob("email", {
+  await sendEmail({
     to: order.customer_email,
     subject: emailContent.subject,
     html: emailContent.html,
@@ -272,7 +272,7 @@ async function handlePaymentSucceeded(pi: any) {
   // Notify restaurant by email
   if (restaurant?.email) {
     const fp = (p: number) => `£${(p / 100).toFixed(2)}`;
-    await enqueueJob("email", {
+    await sendEmail({
       to: restaurant.email,
       subject: `New Order #${order.order_number} — ${fp(order.total)}`,
       html: `<div style="font-family:sans-serif;padding:20px">
@@ -447,38 +447,42 @@ async function handleSubscriptionDeleted(subscription: any) {
 }
 
 // ──────────────────────────────────────
-// Helper: Upsert customer record
+// Helper: Upsert customer record (atomic — no race condition)
 // ──────────────────────────────────────
+// Uses a Postgres stored procedure (migration 022) that performs a single
+// INSERT ... ON CONFLICT DO UPDATE, making total_orders / total_spent
+// increments atomic even when concurrent webhook events fire for the same customer.
 async function upsertCustomer(order: any) {
-  const { data: existingCustomer } = await supabaseAdmin
-    .from("customers")
-    .select("id, total_orders, total_spent")
-    .eq("restaurant_id", order.restaurant_id)
-    .eq("email", order.customer_email)
-    .single();
+  const { error } = await supabaseAdmin.rpc("upsert_customer_order", {
+    p_restaurant_id: order.restaurant_id,
+    p_email: order.customer_email,
+    p_name: order.customer_name,
+    p_phone: order.customer_phone,
+    p_order_total: order.total,
+  });
 
-  if (existingCustomer) {
-    await supabaseAdmin
-      .from("customers")
-      .update({
-        name: order.customer_name,
-        phone: order.customer_phone,
-        total_orders: existingCustomer.total_orders + 1,
-        total_spent: existingCustomer.total_spent + order.total,
-        last_order_at: new Date().toISOString(),
-      })
-      .eq("id", existingCustomer.id);
-  } else {
-    await supabaseAdmin.from("customers").insert({
-      restaurant_id: order.restaurant_id,
-      email: order.customer_email,
-      name: order.customer_name,
-      phone: order.customer_phone,
-      total_orders: 1,
-      total_spent: order.total,
-      last_order_at: new Date().toISOString(),
-      gdpr_consent_at: new Date().toISOString(),
-    });
+  if (error) {
+    // Fall back to best-effort insert if the stored procedure is not yet deployed
+    // (e.g. running against a pre-migration DB). The race condition may still
+    // occur in that edge case, but it won't silently fail.
+    if (error.code === "42883") {
+      log.warn("upsert_customer_order RPC not found — falling back to direct insert", {
+        restaurant_id: order.restaurant_id,
+      });
+      await supabaseAdmin.from("customers").upsert(
+        {
+          restaurant_id: order.restaurant_id,
+          email: order.customer_email.toLowerCase().trim(),
+          name: order.customer_name,
+          phone: order.customer_phone,
+          last_order_at: new Date().toISOString(),
+          gdpr_consent_at: new Date().toISOString(),
+        },
+        { onConflict: "restaurant_id,email", ignoreDuplicates: false }
+      );
+    } else {
+      log.error("upsertCustomer failed", { error: error.message, restaurant_id: order.restaurant_id });
+    }
   }
 }
 

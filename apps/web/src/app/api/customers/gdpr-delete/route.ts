@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireOwner } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import bcrypt from "bcryptjs";
 
@@ -11,15 +10,10 @@ import bcrypt from "bcryptjs";
  * Requires owner password confirmation for safety.
  */
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId, user } = guard;
 
-  const user = session.user as any;
-  if (user.role !== "owner") {
-    return NextResponse.json({ error: "Owner access required" }, { status: 403 });
-  }
-
-  const restaurantId = user.restaurant_id;
   const body = await req.json();
   const { customer_id, owner_password } = body;
 

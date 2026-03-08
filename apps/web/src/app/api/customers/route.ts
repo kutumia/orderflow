@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireSession } from "@/lib/guard";
 
 // GET /api/customers?search=&sort=total_spent&dir=desc&page=1&limit=25&export=csv
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
 
   const search = searchParams.get("search")?.trim() || "";
@@ -33,7 +32,6 @@ export async function GET(req: NextRequest) {
   query = query.order(sortCol, { ascending: dir });
 
   if (exportCsv) {
-    // Fetch all for export
     const { data } = await query.limit(10000);
     if (!data || data.length === 0) {
       return new NextResponse("No customers to export", { status: 404 });
@@ -61,7 +59,6 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Paginated response
   const offset = (page - 1) * limit;
   query = query.range(offset, offset + limit - 1);
 
@@ -79,10 +76,10 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/customers — update customer tags
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
   const { id, tags } = body;
 

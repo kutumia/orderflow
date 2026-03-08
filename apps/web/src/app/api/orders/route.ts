@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { refundPayment } from "@/lib/stripe";
+import { requireSession } from "@/lib/guard";
 
 // GET /api/orders?filter=live|today|all&page=1&limit=50&from=&to=
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
   const filter = searchParams.get("filter") || "live";
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
@@ -31,7 +30,6 @@ export async function GET(req: NextRequest) {
     todayStart.setHours(0, 0, 0, 0);
     query = query.gte("created_at", todayStart.toISOString());
   } else {
-    // "all" — apply pagination and optional date range
     if (from) query = query.gte("created_at", from);
     if (to) query = query.lte("created_at", to);
   }
@@ -52,13 +50,11 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/orders — update order status
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId, user } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
-  const userId = (session.user as any).id;
   const body = await req.json();
-
   const { order_id, status, refund_reason } = body;
 
   if (!order_id || !status) {
@@ -73,7 +69,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
-  // Fetch order
+  // Fetch order — scoped to this restaurant
   const { data: order } = await supabaseAdmin
     .from("orders")
     .select("id, status, stripe_payment_intent_id")
@@ -94,7 +90,6 @@ export async function PUT(req: NextRequest) {
     }
   }
 
-  // Update order
   const updateData: any = { status };
   if (status === "refunded") {
     updateData.refunded_at = new Date().toISOString();
@@ -111,11 +106,10 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
   }
 
-  // Log status change
   await supabaseAdmin.from("order_status_history").insert({
     order_id,
     status,
-    changed_by: userId,
+    changed_by: user.id,
   });
 
   return NextResponse.json({ success: true });

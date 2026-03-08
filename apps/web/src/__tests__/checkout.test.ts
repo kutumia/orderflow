@@ -31,7 +31,7 @@ jest.mock("@/lib/stripe", () => ({
 
 // Mock rate limiter
 jest.mock("@/lib/rate-limit", () => ({
-  checkRateLimit: () => null,
+  checkRateLimitAsync: async () => null,
 }));
 
 // Mock logger

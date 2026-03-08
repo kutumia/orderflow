@@ -11,6 +11,7 @@
  */
 
 import { Redis } from "@upstash/redis";
+import { log } from "@/lib/logger";
 
 const redis = process.env.UPSTASH_REDIS_REST_URL
   ? Redis.fromEnv()
@@ -44,7 +45,7 @@ export async function cached<T>(
         return cachedData;
       }
     } catch (e) {
-      console.warn("Redis get failed for", key, e);
+      log.warn("Redis get failed", { key, error: String(e) });
     }
   } else {
     // 2. Fallback to Local Cache
@@ -64,7 +65,7 @@ export async function cached<T>(
       // Ex, PX, etc are natively supported in Upstash Redis params
       await redis.setex(key, ttlSeconds, data);
     } catch (e) {
-      console.warn("Redis set failed for", key, e);
+      log.warn("Redis set failed", { key, error: String(e) });
     }
   } else {
     const now = Date.now();
@@ -94,7 +95,7 @@ export async function invalidateCache(prefix: string) {
         await redis.del(...keys);
       }
     } catch (e) {
-      console.warn("Redis scan/del failed for prefix", prefix, e);
+      log.warn("Redis scan/del failed", { prefix, error: String(e) });
     }
   } else {
     for (const key of localCache.keys()) {
@@ -113,7 +114,7 @@ export async function clearCache() {
     try {
       await redis.flushdb();
     } catch (e) {
-      console.warn("Redis flushdb failed", e);
+      log.warn("Redis flushdb failed", { error: String(e) });
     }
   }
   localCache.clear();

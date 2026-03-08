@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireSession } from "@/lib/guard";
 
 // GET /api/hours
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data, error } = await supabaseAdmin
     .from("opening_hours")
@@ -22,10 +20,10 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/hours — batch update all hours
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { hours } = await req.json();
 
   if (!Array.isArray(hours)) {

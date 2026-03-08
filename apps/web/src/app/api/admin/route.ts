@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 
 // Admin-only: platform-level management
-function isAdmin(session: any): boolean {
-  return (session?.user as any)?.role === "admin";
-}
 
 // GET /api/admin?type=restaurants|stats
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  if (guard.user.role !== "admin") {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
@@ -93,8 +90,9 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/admin — toggle restaurant active status
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  if (guard.user.role !== "admin") {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 

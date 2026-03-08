@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 
 /**
  * GET /api/qr-code?slug=xxx&size=400
@@ -8,11 +7,11 @@ import { authOptions } from "@/lib/auth";
  * Uses the Google Charts QR API (no dependency needed).
  */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
 
   const { searchParams } = new URL(req.url);
-  const slug = searchParams.get("slug") || (session.user as any).restaurant_slug;
+  const slug = searchParams.get("slug") || (guard.session.user as any).restaurant_slug;
   const size = parseInt(searchParams.get("size") || "400");
   const clampedSize = Math.min(Math.max(size, 100), 1000);
 

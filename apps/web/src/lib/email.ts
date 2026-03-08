@@ -1,4 +1,5 @@
 import { escapeHtml } from "@/lib/validation";
+import { log } from "@/lib/logger";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = "OrderFlow <orders@orderflow.co.uk>";
@@ -11,7 +12,7 @@ interface SendEmailParams {
 
 export async function sendEmail({ to, subject, html }: SendEmailParams) {
   if (!RESEND_API_KEY) {
-    console.warn("RESEND_API_KEY not set — skipping email to:", to);
+    log.warn("RESEND_API_KEY not set — skipping email", { to });
     return { success: false, error: "API key not configured" };
   }
 
@@ -32,7 +33,7 @@ export async function sendEmail({ to, subject, html }: SendEmailParams) {
       }
 
       const err = await res.json();
-      console.error(`Resend error (attempt ${attempt + 1}):`, err);
+      log.error("Resend API error", { attempt: attempt + 1, to, error: err });
 
       // Don't retry on 4xx client errors (bad request, invalid email, etc.)
       if (res.status >= 400 && res.status < 500) {
@@ -44,7 +45,7 @@ export async function sendEmail({ to, subject, html }: SendEmailParams) {
         await new Promise((r) => setTimeout(r, 1000)); // Wait 1s before retry
       }
     } catch (err) {
-      console.error(`Email send failed (attempt ${attempt + 1}):`, err);
+      log.error("Email send failed", { attempt: attempt + 1, to, error: String(err) });
       if (attempt === 0) {
         await new Promise((r) => setTimeout(r, 1000));
       }

@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireSession } from "@/lib/guard";
 
 // GET /api/categories — list categories for authenticated restaurant
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data, error } = await supabaseAdmin
     .from("categories")
@@ -22,17 +20,16 @@ export async function GET(req: NextRequest) {
 
 // POST /api/categories — create a new category
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   if (!body.name?.trim()) {
     return NextResponse.json({ error: "Category name is required" }, { status: 400 });
   }
 
-  // Get the next sort order
   const { data: existing } = await supabaseAdmin
     .from("categories")
     .select("sort_order")
@@ -59,17 +56,16 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/categories — update category (name, sort_order, is_active)
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   if (!body.id) {
     return NextResponse.json({ error: "Category ID is required" }, { status: 400 });
   }
 
-  // If reordering (batch update)
   if (body.reorder && Array.isArray(body.items)) {
     const updates = body.items.map((item: { id: string; sort_order: number }) =>
       supabaseAdmin
@@ -101,16 +97,15 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/categories — delete a category
 export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
 
   if (!id) return NextResponse.json({ error: "Category ID required" }, { status: 400 });
 
-  // Check if category has items
   const { count } = await supabaseAdmin
     .from("menu_items")
     .select("id", { count: "exact", head: true })

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import Stripe from "stripe";
 import { PLANS, SETUP_FEE, type Plan } from "@/lib/feature-gates";
@@ -27,14 +26,14 @@ const PRICE_IDS: Record<string, { monthly: string; annual: string }> = {
 
 // GET /api/subscription — get current subscription status
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const user = session.user as any;
   const { data: restaurant } = await supabaseAdmin
     .from("restaurants")
     .select("stripe_customer_id, subscription_status, trial_ends_at, plan, setup_fee_paid")
-    .eq("id", user.restaurant_id)
+    .eq("id", restaurantId)
     .single();
 
   if (!restaurant?.stripe_customer_id) {
@@ -66,10 +65,10 @@ export async function GET(req: NextRequest) {
 
 // POST /api/subscription — create new subscription or setup fee checkout
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const user = session.user as any;
   const body = await req.json().catch(() => ({}));
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
 
@@ -87,7 +86,7 @@ export async function POST(req: NextRequest) {
       }],
       success_url: `${baseUrl}/dashboard/billing?setup=success`,
       cancel_url: `${baseUrl}/dashboard/billing`,
-      metadata: { restaurant_id: user.restaurant_id, type: "setup_fee" },
+      metadata: { restaurant_id: restaurantId, type: "setup_fee" },
     });
     return NextResponse.json({ checkout_url: checkoutSession.url });
   }
@@ -116,7 +115,7 @@ export async function POST(req: NextRequest) {
     subscription_data: { trial_period_days: 14 },
     success_url: `${baseUrl}/dashboard?subscribed=true`,
     cancel_url: `${baseUrl}/dashboard/billing`,
-    metadata: { restaurant_id: user.restaurant_id, plan },
+    metadata: { restaurant_id: restaurantId, plan },
   });
 
   return NextResponse.json({ checkout_url: checkoutSession.url });
@@ -124,10 +123,10 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/subscription — change plan (upgrade/downgrade)
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const user = session.user as any;
   const body = await req.json();
   const newPlan = body.plan as Plan;
   const annual = body.annual === true;
@@ -139,7 +138,7 @@ export async function PUT(req: NextRequest) {
   const { data: restaurant } = await supabaseAdmin
     .from("restaurants")
     .select("stripe_customer_id, plan")
-    .eq("id", user.restaurant_id)
+    .eq("id", restaurantId)
     .single();
 
   if (!restaurant?.stripe_customer_id) {
@@ -188,7 +187,7 @@ export async function PUT(req: NextRequest) {
     await supabaseAdmin
       .from("restaurants")
       .update({ plan: newPlan, annual_billing: annual })
-      .eq("id", user.restaurant_id);
+      .eq("id", restaurantId);
 
     return NextResponse.json({ success: true, plan: newPlan });
   } catch (err: any) {

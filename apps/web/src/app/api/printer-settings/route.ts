@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import { randomBytes } from "crypto";
 
 // GET /api/printer-settings — get current printer API key
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data } = await supabaseAdmin
     .from("restaurants")
@@ -24,10 +22,10 @@ export async function GET(req: NextRequest) {
 
 // POST /api/printer-settings — generate a new printer API key
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   if (body.action === "generate_key") {

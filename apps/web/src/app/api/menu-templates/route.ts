@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 
 /**
  * GET /api/menu-templates — list user's menu templates
  */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = session.user as any;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { user } = guard;
 
   const { data } = await supabaseAdmin
     .from("menu_templates")
@@ -33,9 +32,9 @@ export async function GET(req: NextRequest) {
  * Body: { name }
  */
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = session.user as any;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { user, restaurantId } = guard;
 
   const { name } = await req.json();
   if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
@@ -44,7 +43,7 @@ export async function POST(req: NextRequest) {
   const { data: categories } = await supabaseAdmin
     .from("categories")
     .select("name, sort_order")
-    .eq("restaurant_id", user.restaurant_id)
+    .eq("restaurant_id", restaurantId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
 
@@ -53,8 +52,8 @@ export async function POST(req: NextRequest) {
     const { data: items } = await supabaseAdmin
       .from("menu_items")
       .select("name, description, price, allergens, modifiers, sort_order")
-      .eq("restaurant_id", user.restaurant_id)
-      .eq("category_id", (await supabaseAdmin.from("categories").select("id").eq("restaurant_id", user.restaurant_id).eq("name", cat.name).single()).data?.id)
+      .eq("restaurant_id", restaurantId)
+      .eq("category_id", (await supabaseAdmin.from("categories").select("id").eq("restaurant_id", restaurantId).eq("name", cat.name).single()).data?.id)
       .eq("is_available", true)
       .order("sort_order", { ascending: true });
 
@@ -77,7 +76,7 @@ export async function POST(req: NextRequest) {
     .insert({
       owner_user_id: user.id,
       name,
-      source_restaurant_id: user.restaurant_id,
+      source_restaurant_id: restaurantId,
       template_data: { categories: templateCategories },
     })
     .select()
@@ -93,9 +92,9 @@ export async function POST(req: NextRequest) {
  * Body: { template_id, target_restaurant_id }
  */
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = session.user as any;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { user } = guard;
 
   const { template_id, target_restaurant_id } = await req.json();
 

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import crypto from "crypto";
 
@@ -52,8 +51,9 @@ export async function GET(req: NextRequest) {
 
   // Admin view: list all partners
   if (adminView) {
-    const session = await getServerSession(authOptions);
-    if (!session || (session.user as any).role !== "admin") {
+    const guard = await requireSession(req);
+    if (!guard.ok) return guard.response;
+    if (guard.user.role !== "admin") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -101,8 +101,9 @@ export async function GET(req: NextRequest) {
  * PUT /api/partners — admin approve/suspend partner
  */
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session || (session.user as any).role !== "admin") {
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  if (guard.user.role !== "admin") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

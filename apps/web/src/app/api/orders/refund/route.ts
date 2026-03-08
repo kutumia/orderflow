@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireOwner } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
@@ -12,15 +11,10 @@ import { escapeHtml } from "@/lib/validation";
  * Processes a full refund via Stripe, updates order status, emails customer.
  */
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const user = session.user as any;
-  if (user.role !== "owner") {
-    return NextResponse.json({ error: "Owner access required" }, { status: 403 });
-  }
-
-  const restaurantId = user.restaurant_id;
   const body = await req.json();
   const { order_id, reason } = body;
 

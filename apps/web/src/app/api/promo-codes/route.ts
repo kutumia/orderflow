@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireOwner, requireSession } from "@/lib/guard";
 
 // GET /api/promo-codes
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data, error } = await supabaseAdmin
     .from("promo_codes")
@@ -22,15 +20,13 @@ export async function GET(req: NextRequest) {
 
 // POST /api/promo-codes — create new promo code
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
-
   const { code, type, value, min_order, expiry, max_uses } = body;
 
-  // Validate
   if (!code?.trim()) {
     return NextResponse.json({ error: "Code is required" }, { status: 400 });
   }
@@ -44,7 +40,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Percentage cannot exceed 100%" }, { status: 400 });
   }
 
-  // Check for duplicate code
   const { data: existing } = await supabaseAdmin
     .from("promo_codes")
     .select("id")
@@ -77,17 +72,15 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/promo-codes — update promo code
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
-
   const { id, ...updates } = body;
 
   if (!id) return NextResponse.json({ error: "Promo code ID required" }, { status: 400 });
 
-  // Only allow certain fields to be updated
   const allowed: Record<string, any> = {};
   if ("is_active" in updates) allowed.is_active = updates.is_active;
   if ("value" in updates) allowed.value = updates.value;
@@ -107,10 +100,10 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/promo-codes?id=xxx
 export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
 

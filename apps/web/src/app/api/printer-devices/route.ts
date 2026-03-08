@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession, requireOwner } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 
 /**
  * GET /api/printer-devices — list all devices for the restaurant
  */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data: devices, error } = await supabaseAdmin
     .from("printer_devices")
@@ -40,15 +38,10 @@ export async function GET(req: NextRequest) {
  * Body: { device_id, device_name?, assigned_categories?, connection_type?, network_host?, network_port?, is_default? }
  */
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const user = session.user as any;
-  if (user.role !== "owner") {
-    return NextResponse.json({ error: "Owner access required" }, { status: 403 });
-  }
-
-  const restaurantId = user.restaurant_id;
   const body = await req.json();
   const { device_id, ...updates } = body;
 
@@ -89,13 +82,9 @@ export async function PUT(req: NextRequest) {
  * DELETE /api/printer-devices?device_id=xxx — remove a device
  */
 export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const user = session.user as any;
-  if (user.role !== "owner") {
-    return NextResponse.json({ error: "Owner access required" }, { status: 403 });
-  }
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { searchParams } = new URL(req.url);
   const deviceId = searchParams.get("device_id");
@@ -108,7 +97,7 @@ export async function DELETE(req: NextRequest) {
     .from("printer_devices")
     .delete()
     .eq("id", deviceId)
-    .eq("restaurant_id", user.restaurant_id);
+    .eq("restaurant_id", restaurantId);
 
   return NextResponse.json({ success: true });
 }

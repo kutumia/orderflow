@@ -15,11 +15,9 @@ export type AuthResult =
  * Returns tenant info on success, or a 401/429 response on failure.
  */
 export async function authenticatePB(req: NextRequest): Promise<AuthResult> {
-  // Support both header and query param (for agent backwards compat)
-  const apiKey =
-    req.headers.get("X-API-Key") ||
-    req.headers.get("x-api-key") ||
-    new URL(req.url).searchParams.get("api_key");
+  // API key must be passed via header only — never as a query param
+  // (query params appear in access logs and browser history)
+  const apiKey = req.headers.get("X-API-Key") || req.headers.get("x-api-key");
 
   if (!apiKey) {
     return {

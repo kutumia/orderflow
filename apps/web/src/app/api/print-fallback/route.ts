@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
 import { escapeHtml } from "@/lib/validation";
+import { log } from "@/lib/logger";
 
 /**
  * POST /api/print-fallback
@@ -114,7 +115,7 @@ export async function POST(req: NextRequest) {
           }),
         });
       } catch (smsErr: any) {
-        console.error("SMS alert failed:", smsErr.message);
+        log.error("SMS alert failed", { error: smsErr.message, jobId: job_id });
       }
     }
 

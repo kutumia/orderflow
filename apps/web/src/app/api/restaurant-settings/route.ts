@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireOwner, requireSession } from "@/lib/guard";
 
 const EDITABLE_FIELDS = [
   "name", "address", "phone", "email", "description",
@@ -15,10 +14,9 @@ const EDITABLE_FIELDS = [
 
 // GET /api/restaurant-settings
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data, error } = await supabaseAdmin
     .from("restaurants")
@@ -35,10 +33,10 @@ export async function GET(req: NextRequest) {
 
 // PUT /api/restaurant-settings
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   // Filter to only editable fields

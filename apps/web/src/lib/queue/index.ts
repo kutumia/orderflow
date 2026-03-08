@@ -1,12 +1,13 @@
 import { Redis } from "@upstash/redis";
 import { log } from "@/lib/logger";
+import { sendEmail } from "@/lib/email";
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL || "",
   token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
 });
 
-export type JobType = "email" | "print_receipt" | "sms_notification";
+export type JobType = "email" | "print_receipt" | "sms_notification" | "campaign_send";
 
 export interface BackgroundJob {
   id: string;
@@ -42,15 +43,16 @@ export async function enqueueJob(type: JobType, payload: any) {
 }
 
 /**
- * Process the next job in the queue (e.g., called by a cron or worker process).
+ * Process the next batch of jobs from the queue.
+ * Called by /api/cron/process-queue (runs every minute via Vercel Cron).
  */
 export async function processQueueBatch(batchSize: number = 5) {
-  if (!process.env.UPSTASH_REDIS_REST_URL) return;
+  if (!process.env.UPSTASH_REDIS_REST_URL) return 0;
 
   const jobsStr = await redis.rpop("orderflow:jobs:queue", batchSize);
   // upstash rpop with count returns an array, or null if empty
   if (!jobsStr || (Array.isArray(jobsStr) && jobsStr.length === 0)) {
-    return 0; // No jobs
+    return 0;
   }
 
   const jobs = Array.isArray(jobsStr) ? jobsStr : [jobsStr];
@@ -59,27 +61,36 @@ export async function processQueueBatch(batchSize: number = 5) {
   for (const jobData of jobs) {
     let job: BackgroundJob;
     try {
-      job = typeof jobData === 'string' ? JSON.parse(jobData) : jobData;
+      job = typeof jobData === "string" ? JSON.parse(jobData) : jobData;
     } catch {
       continue;
     }
 
     try {
-      // Basic router
       switch (job.type) {
         case "email":
-          // await processEmailJob(job.payload);
+          await sendEmail({
+            to: job.payload.to,
+            subject: job.payload.subject,
+            html: job.payload.html,
+          });
           break;
+
         case "print_receipt":
-          // await processPrintJob(job.payload);
+          // Print jobs are dispatched via PrintBridge SDK — handled by printbridge worker
+          log.info("Print receipt job dequeued", {
+            orderId: job.payload.orderId,
+            deviceId: job.payload.deviceId,
+          });
           break;
+
         default:
           log.warn("Unknown job type", { type: job.type });
       }
       processedCount++;
     } catch (err: any) {
       log.error("Job processing failed", { id: job.id, error: err.message });
-      // In a real system, move to a Dead Letter Queue (DLQ)
+      // Move to Dead Letter Queue for inspection
       await redis.lpush("orderflow:jobs:dlq", JSON.stringify(job));
     }
   }

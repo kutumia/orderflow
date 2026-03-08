@@ -16,8 +16,9 @@ import crypto from "crypto";
  * Set CRON_SECRET env var and pass as Authorization header.
  */
 export async function POST(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
   const secret = req.headers.get("Authorization")?.replace("Bearer ", "");
-  if (secret !== process.env.CRON_SECRET && process.env.NODE_ENV === "production") {
+  if (!cronSecret || secret !== cronSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

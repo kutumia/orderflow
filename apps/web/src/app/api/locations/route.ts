@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import { auditLog, userCanAccessRestaurant } from "@/lib/security";
 
@@ -8,9 +7,9 @@ import { auditLog, userCanAccessRestaurant } from "@/lib/security";
  * GET /api/locations — list all restaurants owned by this user
  */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = session.user as any;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { user, restaurantId } = guard;
 
   const { data: links } = await supabaseAdmin
     .from("user_restaurants")
@@ -27,10 +26,10 @@ export async function GET(req: NextRequest) {
     address: l.restaurants.address,
     role: l.role,
     is_primary: l.is_primary,
-    is_current: l.restaurants.id === user.restaurant_id,
+    is_current: l.restaurants.id === restaurantId,
   }));
 
-  return NextResponse.json({ locations, current: user.restaurant_id });
+  return NextResponse.json({ locations, current: restaurantId });
 }
 
 /**
@@ -38,9 +37,9 @@ export async function GET(req: NextRequest) {
  * Body: { restaurant_id }
  */
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = session.user as any;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { user } = guard;
 
   const { restaurant_id } = await req.json();
   if (!restaurant_id) return NextResponse.json({ error: "restaurant_id required" }, { status: 400 });
@@ -74,15 +73,15 @@ export async function PUT(req: NextRequest) {
  * Body: { name, address, slug, postcode, clone_from_restaurant_id? }
  */
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = session.user as any;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { user, restaurantId } = guard;
 
   // Only Pro plan can add locations
   const { data: currentRestaurant } = await supabaseAdmin
     .from("restaurants")
     .select("plan")
-    .eq("id", user.restaurant_id)
+    .eq("id", restaurantId)
     .single();
 
   if (currentRestaurant?.plan !== "pro") {

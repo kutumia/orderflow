@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import bcrypt from "bcryptjs";
 
 // POST /api/change-password
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { user } = guard;
 
-  const userId = (session.user as any).id;
   const body = await req.json();
   const { current_password, new_password } = body;
 
@@ -22,17 +21,17 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify current password
-  const { data: user } = await supabaseAdmin
+  const { data: dbUser } = await supabaseAdmin
     .from("users")
     .select("password_hash")
-    .eq("id", userId)
+    .eq("id", user.id)
     .single();
 
-  if (!user) {
+  if (!dbUser) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const isValid = await bcrypt.compare(current_password, user.password_hash);
+  const isValid = await bcrypt.compare(current_password, dbUser.password_hash);
   if (!isValid) {
     return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
   }
@@ -42,7 +41,7 @@ export async function POST(req: NextRequest) {
   const { error } = await supabaseAdmin
     .from("users")
     .update({ password_hash: newHash })
-    .eq("id", userId);
+    .eq("id", user.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });

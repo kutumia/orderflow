@@ -2,19 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { supabaseAdmin } from "@/lib/supabase";
 import { generateSlug, makeSlugUnique } from "@/lib/utils";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
+import { log } from "@/lib/logger";
 import { z } from "zod";
 
 const registerSchema = z.object({
   restaurantName: z.string().min(1, "Restaurant name is required").max(100),
   ownerName: z.string().min(1, "Your name is required").max(100),
   email: z.string().email("Valid email is required").max(254),
-  password: z.string().min(8, "Password must be at least 8 characters").max(100)
+  password: z.string().min(8, "Password must be at least 8 characters").max(100),
 });
 
 export async function POST(req: NextRequest) {
   // Rate limit: 5 registrations per hour per IP
-  const limited = checkRateLimit(req, 5, 3600_000);
+  const limited = await checkRateLimitAsync(req, "register");
   if (limited) return limited;
 
   try {
@@ -44,121 +45,139 @@ export async function POST(req: NextRequest) {
 
     // ── Generate unique slug ──
     let slug = generateSlug(restaurantName);
-
-    // Check if slug already taken, add suffix if needed
     const { data: existingSlug } = await supabaseAdmin
       .from("restaurants")
       .select("id")
       .eq("slug", slug)
       .single();
-
-    if (existingSlug) {
-      slug = makeSlugUnique(slug);
-    }
+    if (existingSlug) slug = makeSlugUnique(slug);
 
     // ── Hash password ──
     const passwordHash = await bcrypt.hash(password, 12);
-
-    // ── Create restaurant ──
     const trialEndsAt = new Date();
     trialEndsAt.setDate(trialEndsAt.getDate() + 14);
 
-    const { data: restaurant, error: restaurantError } = await supabaseAdmin
-      .from("restaurants")
-      .insert({
-        name: restaurantName.trim(),
-        slug,
-        is_active: true,
-        subscription_status: "trialing",
-        trial_ends_at: trialEndsAt.toISOString(),
-        delivery_enabled: true,
-        collection_enabled: true,
-        delivery_fee: 250, // £2.50 default in pence
-        min_order_delivery: 1000, // £10 default
-        min_order_collection: 0,
-        estimated_delivery_mins: 45,
-        estimated_collection_mins: 20,
-        holiday_mode: false,
-        vat_registered: false,
-      })
-      .select()
-      .single();
+    // ── Atomic creation via stored procedure (single DB transaction) ──
+    // Falls back to sequential inserts if the RPC isn't deployed yet.
+    const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc(
+      "create_restaurant_with_owner",
+      {
+        p_restaurant_name: restaurantName.trim(),
+        p_slug: slug,
+        p_owner_name: ownerName.trim(),
+        p_owner_email: email,
+        p_password_hash: passwordHash,
+        p_trial_ends_at: trialEndsAt.toISOString(),
+      }
+    );
 
-    if (restaurantError) {
-      console.error("Restaurant creation error:", restaurantError);
-      return NextResponse.json(
-        { error: "Failed to create restaurant" },
-        { status: 500 }
-      );
+    if (rpcError) {
+      // If the stored procedure hasn't been deployed yet, fall back gracefully
+      if (rpcError.code === "42883") {
+        log.warn("create_restaurant_with_owner RPC not found, using sequential fallback");
+        return await registerFallback(restaurantName, ownerName, email, passwordHash, slug, trialEndsAt);
+      }
+      log.error("Registration RPC failed", { error: rpcError.message });
+      return NextResponse.json({ error: "Failed to create account" }, { status: 500 });
     }
 
-    // ── Create user (owner) ──
-    const { data: user, error: userError } = await supabaseAdmin
-      .from("users")
-      .insert({
-        email: email.toLowerCase().trim(),
-        name: ownerName.trim(),
-        password_hash: passwordHash,
-        restaurant_id: restaurant.id,
-        role: "owner",
-      })
-      .select()
-      .single();
-
-    if (userError) {
-      console.error("User creation error:", userError);
-      // Clean up the restaurant if user creation failed
-      await supabaseAdmin
-        .from("restaurants")
-        .delete()
-        .eq("id", restaurant.id);
-      return NextResponse.json(
-        { error: "Failed to create user account" },
-        { status: 500 }
-      );
-    }
-
-    // ── Update restaurant with owner_id ──
-    await supabaseAdmin
-      .from("restaurants")
-      .update({ owner_id: user.id })
-      .eq("id", restaurant.id);
-
-    // ── Create subscription record ──
-    await supabaseAdmin.from("subscriptions").insert({
-      restaurant_id: restaurant.id,
-      plan: "growth",
-      status: "trialing",
-      trial_ends_at: trialEndsAt.toISOString(),
-    });
-
-    // ── Create default opening hours (Mon-Sun, 11am-10pm) ──
-    const defaultHours = Array.from({ length: 7 }, (_, i) => ({
-      restaurant_id: restaurant.id,
-      day_of_week: i,
-      open_time: "11:00",
-      close_time: "22:00",
-      is_closed: false,
-    }));
-
-    await supabaseAdmin.from("opening_hours").insert(defaultHours);
+    const result = rpcResult as { restaurant_id: string; user_id: string };
+    log.info("Restaurant registered", { restaurantId: result.restaurant_id, slug });
 
     return NextResponse.json(
       {
         message: "Account created successfully",
-        restaurant: {
-          id: restaurant.id,
-          slug: restaurant.slug,
-          name: restaurant.name,
-        },
+        restaurant: { id: result.restaurant_id, slug, name: restaurantName.trim() },
       },
       { status: 201 }
     );
-  } catch (err) {
-    console.error("Registration error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    log.error("Registration error", { error: err.message, stack: err.stack });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+/**
+ * Fallback: sequential inserts with best-effort cleanup on failure.
+ * Used when the stored procedure hasn't been deployed yet.
+ */
+async function registerFallback(
+  restaurantName: string,
+  ownerName: string,
+  email: string,
+  passwordHash: string,
+  slug: string,
+  trialEndsAt: Date
+): Promise<NextResponse> {
+  const { data: restaurant, error: restaurantError } = await supabaseAdmin
+    .from("restaurants")
+    .insert({
+      name: restaurantName.trim(),
+      slug,
+      is_active: true,
+      subscription_status: "trialing",
+      trial_ends_at: trialEndsAt.toISOString(),
+      delivery_enabled: true,
+      collection_enabled: true,
+      delivery_fee: 250,
+      min_order_delivery: 1000,
+      min_order_collection: 0,
+      estimated_delivery_mins: 45,
+      estimated_collection_mins: 20,
+      holiday_mode: false,
+      vat_registered: false,
+    })
+    .select()
+    .single();
+
+  if (restaurantError) {
+    log.error("Restaurant creation error", { error: restaurantError.message });
+    return NextResponse.json({ error: "Failed to create restaurant" }, { status: 500 });
+  }
+
+  const { data: user, error: userError } = await supabaseAdmin
+    .from("users")
+    .insert({
+      email: email.toLowerCase().trim(),
+      name: ownerName.trim(),
+      password_hash: passwordHash,
+      restaurant_id: restaurant.id,
+      role: "owner",
+    })
+    .select()
+    .single();
+
+  if (userError) {
+    log.error("User creation error", { error: userError.message, restaurantId: restaurant.id });
+    await supabaseAdmin.from("restaurants").delete().eq("id", restaurant.id);
+    return NextResponse.json({ error: "Failed to create user account" }, { status: 500 });
+  }
+
+  await Promise.all([
+    supabaseAdmin.from("restaurants").update({ owner_id: user.id }).eq("id", restaurant.id),
+    supabaseAdmin.from("subscriptions").insert({
+      restaurant_id: restaurant.id,
+      plan: "growth",
+      status: "trialing",
+      trial_ends_at: trialEndsAt.toISOString(),
+    }),
+    supabaseAdmin.from("opening_hours").insert(
+      Array.from({ length: 7 }, (_, i) => ({
+        restaurant_id: restaurant.id,
+        day_of_week: i,
+        open_time: "11:00",
+        close_time: "22:00",
+        is_closed: false,
+      }))
+    ),
+  ]);
+
+  log.info("Restaurant registered via fallback path", { restaurantId: restaurant.id, slug });
+  return NextResponse.json(
+    {
+      message: "Account created successfully",
+      restaurant: { id: restaurant.id, slug: restaurant.slug, name: restaurant.name },
+    },
+    { status: 201 }
+  );
 }

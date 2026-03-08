@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireSession } from "@/lib/guard";
 
 // GET /api/menu-items?category_id=xxx (optional filter)
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
   const categoryId = searchParams.get("category_id");
 
@@ -27,10 +26,10 @@ export async function GET(req: NextRequest) {
 
 // POST /api/menu-items — create a new menu item
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   if (!body.name?.trim()) {
@@ -43,7 +42,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Valid price is required" }, { status: 400 });
   }
 
-  // Get next sort order within category
   const { data: existing } = await supabaseAdmin
     .from("menu_items")
     .select("sort_order")
@@ -61,7 +59,7 @@ export async function POST(req: NextRequest) {
       category_id: body.category_id,
       name: body.name.trim(),
       description: body.description?.trim() || null,
-      price: Math.round(body.price), // pence
+      price: Math.round(body.price),
       image_url: body.image_url || null,
       is_available: body.is_available !== undefined ? body.is_available : true,
       is_popular: body.is_popular || false,
@@ -75,7 +73,6 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Create modifiers if provided
   if (body.modifiers && Array.isArray(body.modifiers) && body.modifiers.length > 0) {
     const modifiers = body.modifiers.map((mod: any, i: number) => ({
       item_id: data.id,
@@ -93,17 +90,16 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/menu-items — update a menu item
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const body = await req.json();
 
   if (!body.id) {
     return NextResponse.json({ error: "Item ID is required" }, { status: 400 });
   }
 
-  // Quick availability toggle
   if (body.toggle_availability !== undefined) {
     const { data, error } = await supabaseAdmin
       .from("menu_items")
@@ -139,9 +135,7 @@ export async function PUT(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Update modifiers if provided
   if (body.modifiers !== undefined && Array.isArray(body.modifiers)) {
-    // Delete existing modifiers and re-create
     await supabaseAdmin.from("item_modifiers").delete().eq("item_id", body.id);
 
     if (body.modifiers.length > 0) {
@@ -162,10 +156,10 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/menu-items?id=xxx
 export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const restaurantId = (session.user as any).restaurant_id;
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
 

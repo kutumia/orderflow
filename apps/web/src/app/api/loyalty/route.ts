@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession, requireOwner } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 
 /**
@@ -9,10 +8,9 @@ import { supabaseAdmin } from "@/lib/supabase";
  * PUT /api/loyalty — earn stamps/points (called from webhook)
  */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data: program } = await supabaseAdmin
     .from("loyalty_programs")
@@ -47,13 +45,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const user = session.user as any;
-  if (user.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
-
-  const restaurantId = user.restaurant_id;
   const body = await req.json();
 
   const programData = {

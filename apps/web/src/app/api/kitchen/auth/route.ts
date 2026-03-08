@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimitAsync } from "@/lib/rate-limit";
 
 // POST /api/kitchen/auth — validate kitchen PIN
 export async function POST(req: NextRequest) {
   // Rate limit: 10 attempts per minute per IP (brute force protection)
-  const limited = checkRateLimit(req, 10, 60_000);
+  const limited = await checkRateLimitAsync(req, "login");
   if (limited) return limited;
 
   const body = await req.json();

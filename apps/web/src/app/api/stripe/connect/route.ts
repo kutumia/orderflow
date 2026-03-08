@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
   createConnectAccount,
@@ -8,14 +7,14 @@ import {
   isAccountReady,
   createDashboardLink,
 } from "@/lib/stripe";
+import { log } from "@/lib/logger";
 
 // POST /api/stripe/connect — start Connect onboarding
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const user = session.user as any;
-  const restaurantId = user.restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
+  const sessionUser = guard.session.user as any;
 
   // Fetch restaurant
   const { data: restaurant } = await supabaseAdmin
@@ -37,7 +36,7 @@ export async function POST(req: NextRequest) {
     if (!accountId) {
       const account = await createConnectAccount(
         restaurantId,
-        restaurant.email || user.email,
+        restaurant.email || sessionUser.email,
         restaurant.name
       );
       accountId = account.id;
@@ -64,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ status: "onboarding", url });
   } catch (err: any) {
-    console.error("Stripe Connect error:", err);
+    log.error("Stripe Connect error", { error: err.message, restaurantId });
     return NextResponse.json(
       { error: err.message || "Failed to set up payments" },
       { status: 500 }
@@ -74,10 +73,9 @@ export async function POST(req: NextRequest) {
 
 // GET /api/stripe/connect — check status
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data: restaurant } = await supabaseAdmin
     .from("restaurants")

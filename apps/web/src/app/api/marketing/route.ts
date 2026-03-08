@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession, requireOwner } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 
 /**
@@ -10,10 +9,9 @@ import { supabaseAdmin } from "@/lib/supabase";
  * DELETE /api/marketing?id=xxx — delete campaign
  */
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const { data, error } = await supabaseAdmin
     .from("marketing_campaigns")
@@ -27,17 +25,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const user = session.user as any;
-  if (user.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const body = await req.json();
   const { data, error } = await supabaseAdmin
     .from("marketing_campaigns")
     .insert({
-      restaurant_id: user.restaurant_id,
+      restaurant_id: restaurantId,
       name: body.name || "Untitled Campaign",
       channel: body.channel || "email",
       subject: body.subject || "",
@@ -54,11 +50,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const user = session.user as any;
-  if (user.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const body = await req.json();
   const { id, ...updates } = body;
@@ -77,17 +71,17 @@ export async function PUT(req: NextRequest) {
     .from("marketing_campaigns")
     .update(allowed)
     .eq("id", id)
-    .eq("restaurant_id", user.restaurant_id);
+    .eq("restaurant_id", restaurantId);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
-  const user = session.user as any;
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
 
@@ -97,7 +91,7 @@ export async function DELETE(req: NextRequest) {
     .from("marketing_campaigns")
     .delete()
     .eq("id", id)
-    .eq("restaurant_id", user.restaurant_id);
+    .eq("restaurant_id", restaurantId);
 
   return NextResponse.json({ success: true });
 }

@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireSession } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
+import { log } from "@/lib/logger";
 
 // POST /api/upload — upload image to Supabase Storage
 // Optimizes: resize to max 800px, convert to WebP, generate 400px thumbnail
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const restaurantId = (session.user as any).restaurant_id;
+  const guard = await requireSession(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   try {
     const formData = await req.formData();
@@ -98,7 +97,7 @@ export async function POST(req: NextRequest) {
       size: fullBuffer.length,
     });
   } catch (err) {
-    console.error("Upload error:", err);
+    log.error("Upload error", { error: String(err), restaurantId });
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }

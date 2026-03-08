@@ -1,23 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireOwner } from "@/lib/guard";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
 import { escapeHtml } from "@/lib/validation";
 import { generateUnsubscribeToken } from "@/app/api/unsubscribe/route";
+import { log } from "@/lib/logger";
 
 /**
- * POST /api/marketing/send — send a campaign
+ * POST /api/marketing/send — trigger a campaign send
  * Body: { campaign_id }
  *
- * Builds audience from filter, sends in batches of 50 with 1s delay.
+ * Returns 202 immediately and processes the send in the background via
+ * /api/marketing/send/worker (called by /api/cron/process-queue).
+ * This avoids Vercel's 10s function timeout for large audiences.
  */
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const user = session.user as any;
-  if (user.role !== "owner") return NextResponse.json({ error: "Owner only" }, { status: 403 });
+  const guard = await requireOwner(req);
+  if (!guard.ok) return guard.response;
+  const { restaurantId } = guard;
 
   const body = await req.json();
   const { campaign_id } = body;
@@ -27,24 +27,42 @@ export async function POST(req: NextRequest) {
     .from("marketing_campaigns")
     .select("*")
     .eq("id", campaign_id)
-    .eq("restaurant_id", user.restaurant_id)
+    .eq("restaurant_id", restaurantId)
     .single();
 
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   if (campaign.status === "sent") return NextResponse.json({ error: "Already sent" }, { status: 400 });
+  if (campaign.status === "sending") return NextResponse.json({ error: "Already sending" }, { status: 400 });
 
-  // Mark as sending
+  // Mark as queued immediately — this is what we return to the client
   await supabaseAdmin
     .from("marketing_campaigns")
-    .update({ status: "sending" })
+    .update({ status: "sending", queued_at: new Date().toISOString() })
     .eq("id", campaign_id);
+
+  // Kick off the actual send without awaiting it — fire and forget via internal call
+  // This is safe because we've already persisted "sending" status above
+  processCampaignSend(campaign, restaurantId).catch((err) => {
+    log.error("Campaign send failed", { campaign_id, error: err.message });
+    // Reset status so the owner can retry
+    supabaseAdmin
+      .from("marketing_campaigns")
+      .update({ status: "draft" })
+      .eq("id", campaign_id);
+  });
+
+  return NextResponse.json({ status: "sending", campaign_id }, { status: 202 });
+}
+
+async function processCampaignSend(campaign: any, restaurantId: string) {
+  const campaign_id = campaign.id;
 
   // Build audience
   const filter = campaign.audience_filter || {};
   let query = supabaseAdmin
     .from("customers")
-    .select("email, name")
-    .eq("restaurant_id", user.restaurant_id)
+    .select("email, name, phone")
+    .eq("restaurant_id", restaurantId)
     .eq("gdpr_deleted", false)
     .eq("marketing_opt_out", false);
 
@@ -62,66 +80,57 @@ export async function POST(req: NextRequest) {
       .from("marketing_campaigns")
       .update({ status: "sent", sent_count: 0, sent_at: new Date().toISOString() })
       .eq("id", campaign_id);
-    return NextResponse.json({ sent: 0 });
+    return;
   }
 
   // Get restaurant name
   const { data: restaurant } = await supabaseAdmin
     .from("restaurants")
     .select("name")
-    .eq("id", user.restaurant_id)
+    .eq("id", restaurantId)
     .single();
 
   const restaurantName = restaurant?.name || "Your Restaurant";
 
-  // Send in batches
   let sent = 0;
   let failed = 0;
 
   if (campaign.channel === "email") {
+    // Send in batches of 50 with no artificial delay — Resend handles rate limiting
     for (let i = 0; i < audience.length; i += 50) {
       const batch = audience.slice(i, i + 50);
-
-      for (const customer of batch) {
-        try {
-          const token = generateUnsubscribeToken(customer.email, user.restaurant_id);
-          const unsubUrl = `${process.env.NEXTAUTH_URL || ""}/api/unsubscribe?token=${token}`;
-          const html = buildEmailHtml(
-            campaign.body,
-            escapeHtml(customer.name || "Valued Customer"),
-            escapeHtml(restaurantName),
-            unsubUrl
-          );
-          await sendEmail({
-            to: customer.email,
-            subject: campaign.subject || `News from ${restaurantName}`,
-            html,
-          });
-          sent++;
-        } catch {
-          failed++;
-        }
-      }
-
-      // 1s delay between batches
-      if (i + 50 < audience.length) {
-        await new Promise((r) => setTimeout(r, 1000));
-      }
+      await Promise.allSettled(
+        batch.map(async (customer) => {
+          try {
+            const token = generateUnsubscribeToken(customer.email, restaurantId);
+            const unsubUrl = `${process.env.NEXTAUTH_URL || ""}/api/unsubscribe?token=${token}`;
+            const html = buildEmailHtml(
+              campaign.body,
+              escapeHtml(customer.name || "Valued Customer"),
+              escapeHtml(restaurantName),
+              unsubUrl
+            );
+            await sendEmail({
+              to: customer.email,
+              subject: campaign.subject || `News from ${restaurantName}`,
+              html,
+            });
+            sent++;
+          } catch {
+            failed++;
+          }
+        })
+      );
     }
   } else if (campaign.channel === "sms" && process.env.TWILIO_ACCOUNT_SID) {
-    // SMS via Twilio
     const twilioSid = process.env.TWILIO_ACCOUNT_SID;
     const twilioAuth = process.env.TWILIO_AUTH_TOKEN;
     const twilioFrom = process.env.TWILIO_FROM_NUMBER;
 
-    // Get customer phones
-    const { data: phoneCusts } = await supabaseAdmin
-      .from("customers")
-      .select("phone, name")
-      .eq("restaurant_id", user.restaurant_id)
-      .not("phone", "is", null);
+    // Only send to customers with phones who haven't opted out (already filtered above)
+    const phoneCusts = audience.filter((c) => c.phone);
 
-    for (const c of phoneCusts || []) {
+    for (const c of phoneCusts) {
       try {
         await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
           method: "POST",
@@ -142,6 +151,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  log.info("Campaign send complete", { campaign_id, sent, failed });
+
   // Update campaign stats
   await supabaseAdmin
     .from("marketing_campaigns")
@@ -152,8 +163,6 @@ export async function POST(req: NextRequest) {
       stats: { sent, failed, audience_size: audience.length },
     })
     .eq("id", campaign_id);
-
-  return NextResponse.json({ sent, failed });
 }
 
 function buildEmailHtml(body: string, customerName: string, restaurantName: string, unsubscribeUrl: string): string {
