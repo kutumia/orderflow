@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabase";
+import { auditSystem, AUDIT_ACTIONS } from "@/lib/audit-logger";
+import { getCorrelationId } from "@/lib/correlation";
 import { sendEmail, orderConfirmationEmail } from "@/lib/email";
 import { formatPlainTextReceipt, type ReceiptOrder } from "@/lib/receipt";
 import { log } from "@/lib/logger";
@@ -15,15 +17,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
   }
 
+  const correlationId = getCorrelationId(req);
   let event;
   try {
     event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err: any) {
-    log.error("Webhook signature verification failed", { error: err.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    log.error("Webhook signature verification failed", { error: message });
+    await auditSystem(correlationId, {
+      tenant: "system",
+      action: AUDIT_ACTIONS.WEBHOOK_HMAC_INVALID,
+      target_type: "webhook",
+      target_id: "stripe",
+      result: "denied",
+      metadata: { source: "stripe" },
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
   log.info("Webhook received", { type: event.type, id: event.id });
+  await auditSystem(correlationId, {
+    tenant: "system",
+    action: AUDIT_ACTIONS.WEBHOOK_RECEIVED,
+    target_type: "webhook",
+    target_id: event.id,
+    result: "success",
+    metadata: { event_type: event.type },
+  });
 
   try {
     switch (event.type) {

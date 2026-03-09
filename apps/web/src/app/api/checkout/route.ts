@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { stripe, calculatePlatformFee } from "@/lib/stripe";
 import { checkRateLimitAsync } from "@/lib/rate-limit";
 import { log } from "@/lib/logger";
+import { audit, AUDIT_ACTIONS } from "@/lib/audit-logger";
+import { checkIdempotency, storeIdempotency, getIdempotencyKey } from "@/lib/idempotency";
 import { z } from "zod";
 import crypto from "crypto";
 
@@ -39,6 +41,13 @@ export async function POST(req: NextRequest) {
   // Rate limit: 10 checkout attempts per minute per IP
   const limited = await checkRateLimitAsync(req, "checkout");
   if (limited) return limited;
+
+  // Idempotency: return cached response for duplicate requests
+  const idempotencyKey = getIdempotencyKey(req);
+  const cached = await checkIdempotency(idempotencyKey, "checkout");
+  if (cached) {
+    return NextResponse.json(cached.body, { status: cached.status });
+  }
 
   try {
     const body = await req.json();
@@ -347,13 +356,33 @@ export async function POST(req: NextRequest) {
       total,
     });
 
-    return NextResponse.json({
+    await audit(req, {
+      actor: "customer",
+      tenant: restaurant_id,
+      action: AUDIT_ACTIONS.ORDER_CREATED,
+      target_type: "order",
+      target_id: order.id,
+      result: "success",
+      metadata: {
+        order_number: order.order_number,
+        total_pence: total,
+        order_type,
+        item_count: verifiedItems.length,
+        promo_code: promoCodeUsed ?? undefined,
+      },
+    }).catch(() => {});
+
+    const responseBody = {
       clientSecret: paymentIntent.client_secret,
       orderId: order.id,
       orderNumber: order.order_number,
       customerToken,
       total,
-    });
+    };
+
+    await storeIdempotency(idempotencyKey, "checkout", { status: 200, body: responseBody });
+
+    return NextResponse.json(responseBody);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     log.error("Checkout error", { error: message });
